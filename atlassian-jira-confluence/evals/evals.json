@@ -1,0 +1,42 @@
+{
+  "skill_name": "atlassian-jira-confluence",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create a Jira bug issue in project KEY 'DEMO' with summary 'Login button not responding on Safari', priority High, and add a comment 'Reproduced on Safari 17.2 — needs urgent fix'.",
+      "expected_output": "A Python script that creates a Jira issue and adds a comment to it, reading credentials from env vars JIRA_URL and JIRA_PAT_TOKEN. The script installs the SDK if missing and prints the new issue key.",
+      "files": [],
+      "expectations": [
+        "Script reads JIRA_URL and JIRA_PAT_TOKEN from environment variables",
+        "Script installs atlassian-python-api if not already installed",
+        "Script calls jira.create_issue or jira.issue_create with the correct fields",
+        "Script adds a comment using jira.issue_add_comment",
+        "Script prints the created issue key on success"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Search Confluence for all pages in space 'ENG' that contain the word 'deployment' and were modified in the last 30 days. Show their titles and last-modified dates.",
+      "expected_output": "A Python script that uses the Confluence CQL search to find pages matching the criteria, reads CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN from env vars, and prints a formatted list of title + last modified date.",
+      "files": [],
+      "expectations": [
+        "Script reads CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN from environment variables",
+        "Script uses confluence.cql() with an appropriate CQL query",
+        "CQL query filters by space = 'ENG', type = page, text ~ 'deployment', and lastModified within 30 days",
+        "Script prints page titles and last-modified dates"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Get all active sprints from Jira board ID 42, list the issues in each sprint with their status, and export the result as a CSV file named sprint_report.csv.",
+      "expected_output": "A Python script that retrieves active sprints from a board, lists issues per sprint with status, and writes a CSV file. Reads JIRA_URL and JIRA_PAT_TOKEN from env vars.",
+      "files": [],
+      "expectations": [
+        "Script reads JIRA_URL and JIRA_PAT_TOKEN from environment variables",
+        "Script calls jira.get_all_sprints_from_board with the board ID",
+        "Script retrieves issues for each sprint using jira.get_all_issues_for_sprint_in_board or similar",
+        "Script writes a CSV file named sprint_report.csv with at least issue key, summary, and status columns"
+      ]
+    }
+  ]
+}
