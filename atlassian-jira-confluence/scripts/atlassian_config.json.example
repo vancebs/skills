@@ -1,0 +1,12 @@
+{
+  "jira": {
+    "url": "https://jira.example.com",
+    "token": "your-jira-pat-token",
+    "username": "user@example.com"
+  },
+  "confluence": {
+    "url": "https://confluence.example.com",
+    "token": "your-confluence-pat-token",
+    "username": "user@example.com"
+  }
+}

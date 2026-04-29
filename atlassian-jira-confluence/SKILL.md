@@ -19,23 +19,73 @@ pip install atlassian-python-api
 
 On Windows (CMD or PowerShell), `pip` and `python` should both work. If `pip` isn't on PATH, try `python -m pip install atlassian-python-api`.
 
-### 2. Read Credentials from Environment Variables
+### 2. Read Credentials (Config File or Environment Variables)
 
-Credentials come from environment variables — never ask the user to paste tokens into code.
+Credentials are loaded with the following priority (highest first):
+
+1. **Config file** — `atlassian_config.json` in the current working directory
+2. **Environment variables** — fallback when no config file is present
+
+This allows multiple agents to each maintain their own `atlassian_config.json` with separate accounts without conflicting environment variables.
+
+#### Config File Format (`atlassian_config.json`)
+
+```json
+{
+  "jira": {
+    "url": "https://jira.example.com",
+    "token": "your-pat-token",
+    "username": "user@example.com"
+  },
+  "confluence": {
+    "url": "https://confluence.example.com",
+    "token": "your-pat-token",
+    "username": "user@example.com"
+  }
+}
+```
+
+- `username` is only required for Atlassian Cloud (`.atlassian.net` URLs); omit for Data Center / Server.
+- The config file is never committed — add `atlassian_config.json` to `.gitignore`.
+
+#### Credential Loading Helper
+
+Always use this helper at the top of every script. It reads the config file first, then falls back to environment variables:
 
 ```python
 import os
+import json
 
-# Confluence
-CONFLUENCE_URL = os.environ.get("CONFLUENCE_URL")
-CONFLUENCE_PAT_TOKEN = os.environ.get("CONFLUENCE_PAT_TOKEN")
+def load_atlassian_config():
+    """Load credentials from atlassian_config.json (priority) or environment variables."""
+    config = {}
+    config_path = os.path.join(os.getcwd(), "atlassian_config.json")
+    if os.path.isfile(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
 
-# Jira
-JIRA_URL = os.environ.get("JIRA_URL")
-JIRA_PAT_TOKEN = os.environ.get("JIRA_PAT_TOKEN")
+    def _get(section, key, env_var):
+        return config.get(section, {}).get(key) or os.environ.get(env_var)
+
+    return {
+        "JIRA_URL":           _get("jira",       "url",      "JIRA_URL"),
+        "JIRA_PAT_TOKEN":     _get("jira",       "token",    "JIRA_PAT_TOKEN"),
+        "JIRA_USERNAME":      _get("jira",       "username", "JIRA_USERNAME"),
+        "CONFLUENCE_URL":     _get("confluence", "url",      "CONFLUENCE_URL"),
+        "CONFLUENCE_PAT_TOKEN": _get("confluence", "token",  "CONFLUENCE_PAT_TOKEN"),
+        "CONFLUENCE_USERNAME":  _get("confluence", "username", "CONFLUENCE_USERNAME"),
+    }
+
+creds = load_atlassian_config()
+JIRA_URL            = creds["JIRA_URL"]
+JIRA_PAT_TOKEN      = creds["JIRA_PAT_TOKEN"]
+JIRA_USERNAME       = creds["JIRA_USERNAME"]
+CONFLUENCE_URL      = creds["CONFLUENCE_URL"]
+CONFLUENCE_PAT_TOKEN = creds["CONFLUENCE_PAT_TOKEN"]
+CONFLUENCE_USERNAME  = creds["CONFLUENCE_USERNAME"]
 ```
 
-If any required variable is missing, surface a clear error message telling the user which variable to set.
+If any required credential is missing after both sources are checked, surface a clear error message.
 
 ### 3. Initialize Clients
 
@@ -50,7 +100,6 @@ confluence = Confluence(url=CONFLUENCE_URL, token=CONFLUENCE_PAT_TOKEN)
 **Atlassian Cloud** (if URL contains `.atlassian.net`):
 ```python
 # Cloud uses username + API token (not PAT)
-# JIRA_PAT_TOKEN holds the API token; also need JIRA_USERNAME
 jira = Jira(url=JIRA_URL, username=JIRA_USERNAME, password=JIRA_PAT_TOKEN, cloud=True)
 confluence = Confluence(url=CONFLUENCE_URL, username=CONFLUENCE_USERNAME, password=CONFLUENCE_PAT_TOKEN, cloud=True)
 ```
@@ -62,18 +111,22 @@ def is_cloud(url: str) -> bool:
 
 def get_jira():
     if not JIRA_URL or not JIRA_PAT_TOKEN:
-        raise EnvironmentError("Set JIRA_URL and JIRA_PAT_TOKEN environment variables.")
+        raise EnvironmentError(
+            "Jira credentials missing. Set 'jira.url' and 'jira.token' in atlassian_config.json "
+            "or set JIRA_URL and JIRA_PAT_TOKEN environment variables."
+        )
     if is_cloud(JIRA_URL):
-        username = os.environ.get("JIRA_USERNAME", "")
-        return Jira(url=JIRA_URL, username=username, password=JIRA_PAT_TOKEN, cloud=True)
+        return Jira(url=JIRA_URL, username=JIRA_USERNAME or "", password=JIRA_PAT_TOKEN, cloud=True)
     return Jira(url=JIRA_URL, token=JIRA_PAT_TOKEN)
 
 def get_confluence():
     if not CONFLUENCE_URL or not CONFLUENCE_PAT_TOKEN:
-        raise EnvironmentError("Set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN environment variables.")
+        raise EnvironmentError(
+            "Confluence credentials missing. Set 'confluence.url' and 'confluence.token' in atlassian_config.json "
+            "or set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN environment variables."
+        )
     if is_cloud(CONFLUENCE_URL):
-        username = os.environ.get("CONFLUENCE_USERNAME", "")
-        return Confluence(url=CONFLUENCE_URL, username=username, password=CONFLUENCE_PAT_TOKEN, cloud=True)
+        return Confluence(url=CONFLUENCE_URL, username=CONFLUENCE_USERNAME or "", password=CONFLUENCE_PAT_TOKEN, cloud=True)
     return Confluence(url=CONFLUENCE_URL, token=CONFLUENCE_PAT_TOKEN)
 ```
 
@@ -128,7 +181,7 @@ See `references/confluence-operations.md` for the full reference. Key categories
 
 When a user asks for a Jira/Confluence operation:
 
-1. **Check environment variables** — fail fast with a helpful message if missing
+1. **Check credentials** — load from `atlassian_config.json` first, then env vars; fail fast with a helpful message if missing
 2. **Install SDK** if not present (`pip install atlassian-python-api`)
 3. **Write a Python script** using the patterns in the reference files
 4. **Run it** using `python` (or `python3` on Linux/Mac)
@@ -197,4 +250,5 @@ for item in results.get("results", []):
 For the complete API reference with all method signatures, see:
 - `references/jira-operations.md`
 - `references/confluence-operations.md`
-- `scripts/setup_check.py` — verifies environment and SDK installation
+- `scripts/setup_check.py` — verifies credentials (config file + env vars) and SDK installation
+- `scripts/atlassian_config.json.example` — config file template (copy to your agent's working dir as `atlassian_config.json`)
