@@ -1,18 +1,18 @@
 ---
 name: gerrit-api
-description: Interact with Gerrit Code Review via the REST API — query changes, fetch diffs, post reviews with labels and inline comments, and manage change lifecycle.
+description: Interact with Gerrit Code Review via the REST API — query changes, fetch diffs, post reviews with labels and inline comments, and manage change lifecycle. Also supports real-time event streaming via SSH (stream-events).
 license: Apache-2.0
-compatibility: Requires git, curl, jq, and base64. Optional python3 for URL encoding.
+compatibility: Requires git, curl, jq, and base64. Requires python3 (≥3.9) and ssh for stream-events. Optional python3 for URL encoding.
 metadata:
   based-on: https://github.com/yurnov/gerrit-in-5-min (gerrit-review skill by @yurnov)
-  keywords: [gerrit, code review, code review automation, developer tools]
+  keywords: [gerrit, code review, code review automation, developer tools, stream-events, ssh]
 ---
 
 # Gerrit API Skill
 
-This skill enables you to interact with a Gerrit Code Review instance through its REST API. Use it to query open changes, read diffs, post code reviews, and manage change lifecycle (submit, abandon, restore).
+This skill enables you to interact with a Gerrit Code Review instance through its REST API and real-time SSH event stream. Use it to query open changes, read diffs, post code reviews, manage change lifecycle (submit, abandon, restore), and **continuously listen for Gerrit events** (new patch sets, merges, comments, and more).
 
-Compared to the upstream `gerrit-review` skill, this version adds **config file support** so that multiple agents can each maintain their own credentials without conflicting environment variables.
+Compared to the upstream `gerrit-review` skill, this version adds **config file support** so that multiple agents can each maintain their own credentials without conflicting environment variables, and **SSH stream-events support** for real-time change processing.
 
 ## Prerequisites
 
@@ -23,6 +23,8 @@ Credentials are loaded with the following priority (highest first):
 1. **Config file** — `gerrit_config.json` in the current working directory
 2. **Environment variables** — fallback when no config file is present
 
+#### REST API credentials
+
 | Credential | Config file key | Environment variable | Description |
 |---|---|---|---|
 | Base URL | `url` | `GERRIT_URL` | Base URL of the Gerrit instance (no trailing slash) |
@@ -32,6 +34,18 @@ Credentials are loaded with the following priority (highest first):
 > [!IMPORTANT]
 > The **HTTP password** is NOT the user's login password. It is a separate token generated in the Gerrit web UI under **Settings → HTTP Credentials → Generate Password**.
 
+#### SSH stream-events credentials
+
+| Credential | Config file key | Environment variable | Description |
+|---|---|---|---|
+| SSH host | `ssh_host` | `GERRIT_SSH_HOST` | Hostname for SSH (defaults to host extracted from `url`) |
+| SSH port | `ssh_port` | `GERRIT_SSH_PORT` | SSH port (default: `29418`) |
+| SSH username | `ssh_username` | `GERRIT_SSH_USERNAME` | SSH username (defaults to `username`) |
+| SSH key | `ssh_key` | `GERRIT_SSH_KEY` | Path to SSH private key (optional; uses SSH agent/default keys if absent) |
+
+> [!IMPORTANT]
+> The SSH user's public key must be uploaded to Gerrit under **Settings → SSH Keys**. The Gerrit SSH port is usually **29418** (not 22).
+
 #### Config File (`gerrit_config.json`)
 
 Copy `scripts/gerrit_config.json.example` to your agent's working directory as `gerrit_config.json` and fill in real values:
@@ -40,9 +54,15 @@ Copy `scripts/gerrit_config.json.example` to your agent's working directory as `
 {
   "url": "https://gerrit.example.com",
   "username": "john.doe",
-  "password": "your-http-credential-token"
+  "password": "your-http-credential-token",
+  "ssh_host": "gerrit.example.com",
+  "ssh_port": 29418,
+  "ssh_username": "john.doe",
+  "ssh_key": "~/.ssh/id_rsa"
 }
 ```
+
+The SSH fields are only needed for stream-events. `ssh_host` is inferred from `url` when absent.
 
 - Config file values take **priority** over environment variables.
 - Add `gerrit_config.json` to `.gitignore` — never commit credentials.
@@ -57,16 +77,10 @@ When no config file is present, credentials come from environment variables:
 export GERRIT_URL="https://gerrit.example.com"
 export GERRIT_USERNAME="john.doe"
 export GERRIT_HTTP_PASSWORD="your-http-credential-token"
-
-# Windows CMD
-set GERRIT_URL=https://gerrit.example.com
-set GERRIT_USERNAME=john.doe
-set GERRIT_HTTP_PASSWORD=your-http-credential-token
-
-# Windows PowerShell
-$env:GERRIT_URL = "https://gerrit.example.com"
-$env:GERRIT_USERNAME = "john.doe"
-$env:GERRIT_HTTP_PASSWORD = "your-http-credential-token"
+export GERRIT_SSH_HOST="gerrit.example.com"   # optional; derived from GERRIT_URL
+export GERRIT_SSH_PORT="29418"                 # optional; default 29418
+export GERRIT_SSH_USERNAME="john.doe"          # optional; defaults to GERRIT_USERNAME
+export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # optional
 ```
 
 ### Tools
@@ -74,6 +88,8 @@ $env:GERRIT_HTTP_PASSWORD = "your-http-credential-token"
 - `curl` — used for all REST API calls
 - `jq` — used for JSON parsing and pretty-printing (also used to read the config file)
 - `base64` — used for decoding file content responses
+- `python3` (≥ 3.9) — used for `gerrit_stream_events.py` (stream-events listener)
+- `ssh` — used by the stream-events listener to connect to Gerrit
 
 ## Quick Start
 
@@ -109,6 +125,188 @@ chmod +x scripts/gerrit_api.sh
 
 # Abandon a change
 ./scripts/gerrit_api.sh abandon 12345
+```
+
+## SSH Stream Events
+
+Gerrit exposes a real-time event feed over SSH via `gerrit stream-events`. Use `scripts/gerrit_stream_events.py` to subscribe to this feed, parse each event, and act on it continuously.
+
+### How it works
+
+1. The script opens an SSH connection to the Gerrit server on port 29418 (or `ssh_port`).
+2. It runs `gerrit stream-events` on the server.
+3. Gerrit emits one JSON object per line for every repository event.
+4. The script parses each line, enriches it with a `summary` string and `_received_at` timestamp, optionally filters by event type / project / branch, and writes to stdout (and optionally a log file).
+
+### Quick Start — Stream Events
+
+```bash
+# Make executable (one-time)
+chmod +x scripts/gerrit_stream_events.py
+
+# Stream all events (Ctrl+C to stop)
+python3 scripts/gerrit_stream_events.py
+
+# Pretty-print only new patch-set uploads and merges
+python3 scripts/gerrit_stream_events.py \
+  --filter patchset-created,change-merged \
+  --pretty
+
+# Show one-line human-readable summaries
+python3 scripts/gerrit_stream_events.py --summary
+
+# Collect 20 events then exit (useful for testing)
+python3 scripts/gerrit_stream_events.py --max-events 20
+
+# Run for 5 minutes, log to file, auto-reconnect on drop
+python3 scripts/gerrit_stream_events.py \
+  --timeout 300 \
+  --output gerrit_events.jsonl \
+  --reconnect
+
+# Filter to a specific project and branch, pipe to jq
+python3 scripts/gerrit_stream_events.py \
+  --filter patchset-created \
+  --project myOrg/myProject \
+  --branch main \
+  | jq '{type, change: .change.number, subject: .change.subject, uploader: .uploader.name}'
+```
+
+### Agent Patterns
+
+Agents can interact with the stream-events script in two ways:
+
+#### Pattern A — Background listener + polling log file
+
+Start the listener in background mode (async bash), writing events to a file. Periodically read and process the file.
+
+```bash
+# Step 1: Start listener in background (async bash tool)
+python3 scripts/gerrit_stream_events.py \
+  --output events.jsonl \
+  --reconnect \
+  --quiet &
+
+# Step 2 (later): Read new events from the log file
+tail -n 50 events.jsonl | while IFS= read -r line; do
+  TYPE=$(echo "$line" | jq -r '.type')
+  CHANGE=$(echo "$line" | jq -r '.change.number // empty')
+  echo "Event: $TYPE on change $CHANGE"
+done
+```
+
+#### Pattern B — Bounded collection for batch processing
+
+Run the listener for a fixed number of events or time, then process them all:
+
+```bash
+# Collect events for 30 seconds
+python3 scripts/gerrit_stream_events.py \
+  --timeout 30 \
+  --filter patchset-created,change-merged \
+  > batch_events.jsonl
+
+# Process: auto-review each new patch set
+jq -r 'select(.type=="patchset-created") | "\(.change.number) \(.patchSet.number)"' \
+  batch_events.jsonl \
+  | while read change_id ps_num; do
+      ./scripts/gerrit_api.sh review "$change_id" "$ps_num" \
+        '{"message":"CI started","labels":{"Verified":0}}'
+    done
+```
+
+#### Pattern C — Pipe-based real-time processing
+
+Run the listener and pipe each event through a handler:
+
+```bash
+python3 scripts/gerrit_stream_events.py \
+  --filter patchset-created \
+  | while IFS= read -r event; do
+      CHANGE=$(echo "$event" | jq -r '.change.number')
+      SUBJECT=$(echo "$event" | jq -r '.change.subject')
+      echo "New patch set on change $CHANGE: $SUBJECT"
+      # Trigger review, CI, or notification here
+    done
+```
+
+### Event Type Reference
+
+| Event type | Trigger | Key extra fields |
+|---|---|---|
+| `patchset-created` | New patch set uploaded | `uploader`, `patchSet.number`, `patchSet.revision` |
+| `change-merged` | Change submitted/merged | `submitter`, `newRev` |
+| `change-abandoned` | Change abandoned | `abandoner`, `reason` |
+| `change-restored` | Change restored | `restorer`, `reason` |
+| `comment-added` | Review comment posted | `author`, `approvals[]`, `comment` |
+| `reviewer-added` | Reviewer added | `reviewer` |
+| `reviewer-deleted` | Reviewer removed | `reviewer` |
+| `vote-deleted` | Vote deleted | `reviewer`, `remover`, `approvals[]` |
+| `topic-changed` | Topic updated | `changer`, `oldTopic` |
+| `hashtags-changed` | Hashtags updated | `editor`, `added[]`, `removed[]` |
+| `ref-updated` | Git ref pushed/deleted | `submitter`, `refUpdate.project`, `refUpdate.refName`, `refUpdate.newRev` |
+| `project-created` | New project created | `projectName`, `headName` |
+| `pending-check-updated` | Pending check updated | `pendingChecksInfo` |
+
+### Parsed Event Structure
+
+Every event emitted by the script has these additional fields added:
+
+| Field | Description |
+|---|---|
+| `_received_at` | ISO 8601 UTC timestamp when the agent received the event |
+| `summary` | Human-readable one-line description of the event |
+
+**Example parsed event** (`patchset-created`):
+
+```json
+{
+  "type": "patchset-created",
+  "change": {
+    "project": "myOrg/myProject",
+    "branch": "main",
+    "id": "Iabc123...",
+    "number": 12345,
+    "subject": "Fix null pointer in UserService",
+    "owner": { "name": "Alice", "email": "alice@example.com" },
+    "url": "https://gerrit.example.com/c/myOrg/myProject/+/12345",
+    "commitMessage": "Fix null pointer in UserService\n\nChange-Id: Iabc123...\n",
+    "status": "NEW"
+  },
+  "patchSet": {
+    "number": 2,
+    "revision": "deadbeef...",
+    "parents": ["cafebabe..."],
+    "ref": "refs/changes/45/12345/2",
+    "uploader": { "name": "Alice" },
+    "author": { "name": "Alice" },
+    "sizeInsertions": 10,
+    "sizeDeletions": -3
+  },
+  "uploader": { "name": "Alice", "email": "alice@example.com", "username": "alice" },
+  "eventCreatedOn": 1715000000,
+  "_received_at": "2025-05-06T12:00:00Z",
+  "summary": "2025-05-06T12:00:00Z patchset-created: Alice uploaded ps2 to [myOrg/myProject/main #12345] 'Fix null pointer in UserService'"
+}
+```
+
+### Script Options Reference
+
+```
+python3 scripts/gerrit_stream_events.py [options]
+
+  --config FILE         Config file (default: gerrit_config.json in cwd)
+  --filter TYPES        Comma-separated event types to include (default: all)
+  --project NAMES       Comma-separated project names to filter
+  --branch NAMES        Comma-separated branch names to filter
+  --output FILE         Append compact JSON events to FILE in addition to stdout
+  --max-events N        Stop after N events (0 = unlimited)
+  --timeout SECS        Stop after SECS seconds (0 = unlimited)
+  --reconnect           Reconnect automatically on connection loss
+  --reconnect-delay N   Seconds between reconnect attempts (default: 5)
+  --pretty              Pretty-print JSON output
+  --summary             Emit one-line human-readable summaries instead of JSON
+  --quiet               Suppress log/status messages on stderr
 ```
 
 ## Gerrit Concepts
@@ -504,6 +702,7 @@ Additional `comments` fields:
 ## Files
 
 - `scripts/gerrit_api.sh` — REST API helper script (reads `gerrit_config.json` first, then env vars)
+- `scripts/gerrit_stream_events.py` — SSH stream-events listener and event parser
 - `scripts/gerrit_config.json.example` — config file template; copy to your agent's working directory as `gerrit_config.json`
 
 ## References
@@ -511,4 +710,6 @@ Additional `comments` fields:
 - [Gerrit REST API Documentation](https://gerrit-review.googlesource.com/Documentation/rest-api.html)
 - [Gerrit Changes REST API](https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html)
 - [Gerrit Search Operators](https://gerrit-review.googlesource.com/Documentation/user-search.html)
+- [Gerrit Stream Events (SSH)](https://gerrit-review.googlesource.com/Documentation/cmd-stream-events.html)
+- [Gerrit SSH Commands](https://gerrit-review.googlesource.com/Documentation/cmd-index.html)
 - [Gerrit in 5 Minutes](https://github.com/yurnov/gerrit-in-5-min) — original skill this is based on

@@ -1,5 +1,11 @@
 {
   "url": "https://gerrit.example.com",
   "username": "john.doe",
-  "password": "your-http-credential-token"
+  "password": "your-http-credential-token",
+
+  "_comment_ssh": "SSH settings for stream-events. ssh_host defaults to the host in 'url'.",
+  "ssh_host": "gerrit.example.com",
+  "ssh_port": 29418,
+  "ssh_username": "john.doe",
+  "ssh_key": "~/.ssh/id_rsa"
 }
