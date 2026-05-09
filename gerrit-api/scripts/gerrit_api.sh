@@ -57,15 +57,22 @@ fi
 # ─── Validate credentials ────────────────────────────────────────────────────
 
 if [[ -z "${GERRIT_URL:-}" ]]; then
-  echo "ERROR: GERRIT_URL is not set. Set it in gerrit_config.json or as an environment variable." >&2
+  echo "ERROR: Gerrit base URL is not configured." >&2
+  echo "  → Set \"url\" in gerrit_config.json (copy scripts/gerrit_config.json.example to get started)" >&2
+  echo "  → Or: export GERRIT_URL='https://gerrit.example.com'" >&2
   exit 1
 fi
 if [[ -z "${GERRIT_USERNAME:-}" ]]; then
-  echo "ERROR: GERRIT_USERNAME is not set. Set it in gerrit_config.json or as an environment variable." >&2
+  echo "ERROR: Gerrit username is not configured." >&2
+  echo "  → Set \"username\" in gerrit_config.json (Gerrit → Settings → Profile → Username)" >&2
+  echo "  → Or: export GERRIT_USERNAME='john.doe'" >&2
   exit 1
 fi
 if [[ -z "${GERRIT_HTTP_PASSWORD:-}" ]]; then
-  echo "ERROR: GERRIT_HTTP_PASSWORD is not set. Set it in gerrit_config.json or as an environment variable." >&2
+  echo "ERROR: Gerrit HTTP password is not configured." >&2
+  echo "  → Set \"password\" in gerrit_config.json" >&2
+  echo "  → Generate it in Gerrit: Settings → HTTP Credentials → Generate Password" >&2
+  echo "  → Or: export GERRIT_HTTP_PASSWORD='your-token'" >&2
   exit 1
 fi
 

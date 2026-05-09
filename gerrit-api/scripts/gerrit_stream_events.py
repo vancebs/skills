@@ -106,13 +106,15 @@ def load_config(config_path: str | None) -> dict:
     _env_fallback(cfg, "ssh_username", "GERRIT_SSH_USERNAME")
     _env_fallback(cfg, "ssh_key",      "GERRIT_SSH_KEY")
 
-    # Derive ssh_host from url when absent
+    # Derive ssh_host from url when absent or empty (direct assignment also covers
+    # the edge case where config file contained an explicit empty string "ssh_host":"")
     if not cfg.get("ssh_host") and cfg.get("url"):
         parsed = urllib.parse.urlparse(cfg["url"])
-        cfg.setdefault("ssh_host", parsed.hostname or "")
+        cfg["ssh_host"] = parsed.hostname or ""
 
-    # ssh_username falls back to http username
-    cfg.setdefault("ssh_username", cfg.get("username", ""))
+    # ssh_username falls back to http username (direct assignment for the same reason)
+    if not cfg.get("ssh_username"):
+        cfg["ssh_username"] = cfg.get("username", "")
 
     # Convert port to int
     raw_port = cfg.get("ssh_port", 29418)
@@ -142,13 +144,19 @@ def build_ssh_command(cfg: dict) -> list[str]:
 
     if not host:
         raise RuntimeError(
-            "SSH host is not configured. Set ssh_host in gerrit_config.json "
-            "or GERRIT_SSH_HOST environment variable."
+            "SSH host could not be determined.\n"
+            "  Fix one of the following:\n"
+            '  1. Add "ssh_host": "gerrit.example.com" to gerrit_config.json\n'
+            '  2. Ensure "url" is set in gerrit_config.json (ssh_host is derived from it)\n'
+            "  3. Set environment variable: GERRIT_SSH_HOST=gerrit.example.com"
         )
     if not user:
         raise RuntimeError(
-            "SSH username is not configured. Set ssh_username (or username) "
-            "in gerrit_config.json or GERRIT_SSH_USERNAME environment variable."
+            "SSH username could not be determined.\n"
+            "  Fix one of the following:\n"
+            '  1. Add "ssh_username": "your-username" to gerrit_config.json\n'
+            '  2. Ensure "username" is set in gerrit_config.json (ssh_username defaults to it)\n'
+            "  3. Set environment variable: GERRIT_SSH_USERNAME=your-username"
         )
 
     cmd = [
@@ -454,6 +462,32 @@ def stream_events(args: argparse.Namespace) -> int:
                         _err(f"SSH process exited with code {proc.returncode}.")
                         if stderr_output:
                             _err(f"SSH stderr: {stderr_output}")
+                        # Targeted guidance based on error type
+                        stderr_lc = stderr_output.lower()
+                        ssh_key_info = cfg.get("ssh_key") or "(default keys from ~/.ssh/)"
+                        if "permission denied" in stderr_lc or "publickey" in stderr_lc:
+                            _err(f"  → Auth failed. SSH user: {cfg.get('ssh_username')!r}, "
+                                 f"key: {ssh_key_info}")
+                            _err("  → Ensure your SSH public key is uploaded to Gerrit:")
+                            _err("    Gerrit web UI → Settings → SSH Keys → Add Key")
+                        elif ("connection refused" in stderr_lc
+                              or "connect to host" in stderr_lc
+                              or "no route to host" in stderr_lc):
+                            _err(f"  → Cannot connect to {cfg.get('ssh_host')!r} "
+                                 f"port {cfg.get('ssh_port')}.")
+                            _err("  → Check ssh_host and ssh_port in gerrit_config.json.")
+                            _err(f"  → Test: ssh -p {cfg.get('ssh_port')} "
+                                 f"{cfg.get('ssh_username')}@{cfg.get('ssh_host')} gerrit version")
+                        elif "not allowed" in stderr_lc or "access denied" in stderr_lc:
+                            _err("  → This Gerrit account may lack 'Stream Events' capability.")
+                            _err("    Ask a Gerrit admin to grant it under Global Capabilities.")
+                        else:
+                            _err(f"  → Verify gerrit_config.json: "
+                                 f"ssh_host={cfg.get('ssh_host')!r}, "
+                                 f"ssh_port={cfg.get('ssh_port')}, "
+                                 f"ssh_username={cfg.get('ssh_username')!r}")
+                            _err(f"  → Test: ssh -p {cfg.get('ssh_port')} "
+                                 f"{cfg.get('ssh_username')}@{cfg.get('ssh_host')} gerrit version")
                     if not args.reconnect:
                         exit_code = proc.returncode or 1
                         break
@@ -465,7 +499,13 @@ def stream_events(args: argparse.Namespace) -> int:
 
             except OSError as e:
                 if not args.quiet:
-                    _err(f"SSH error: {e}")
+                    _err(f"SSH launch error: {e}")
+                    if "No such file" in str(e) or "not found" in str(e).lower():
+                        _err("  → 'ssh' is not installed or not in PATH. Install OpenSSH.")
+                    else:
+                        _err(f"  → Verify: ssh_host={cfg.get('ssh_host')!r}, "
+                             f"ssh_port={cfg.get('ssh_port')}, "
+                             f"ssh_username={cfg.get('ssh_username')!r}")
                 if not args.reconnect:
                     exit_code = 1
                     break
