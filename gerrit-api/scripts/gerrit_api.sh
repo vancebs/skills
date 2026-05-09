@@ -37,13 +37,36 @@
 
 set -euo pipefail
 
-# ─── Config file loading (priority over env vars) ────────────────────────────
+# ─── Config file search (priority order) ─────────────────────────────────────
+#
+# 1. {workspace}/config/gerrit-api/gerrit_config.json   ← preferred
+# 2. {workspace}/config/gerrit_config.json
+# 3. {workspace}/gerrit_config.json
+# 4. {skill dir}/gerrit_config.json                     ← dev/testing fallback
+#
+# {workspace} = current working directory when the script is invoked
+# {skill dir} = the gerrit-api/ directory (parent of this scripts/ folder)
 
-_CONFIG_FILE="$(pwd)/gerrit_config.json"
+_SKILL_NAME="gerrit-api"
+_CONFIG_FILENAME="gerrit_config.json"
+_WORKSPACE="$(pwd)"
+_SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [[ -f "$_CONFIG_FILE" ]]; then
+_CONFIG_FILE=""
+for _candidate in \
+    "${_WORKSPACE}/config/${_SKILL_NAME}/${_CONFIG_FILENAME}" \
+    "${_WORKSPACE}/config/${_CONFIG_FILENAME}" \
+    "${_WORKSPACE}/${_CONFIG_FILENAME}" \
+    "${_SKILL_DIR}/${_CONFIG_FILENAME}"; do
+  if [[ -f "$_candidate" ]]; then
+    _CONFIG_FILE="$_candidate"
+    break
+  fi
+done
+
+if [[ -n "$_CONFIG_FILE" ]]; then
   if ! command -v jq &>/dev/null; then
-    echo "ERROR: jq is required to read gerrit_config.json but was not found." >&2
+    echo "ERROR: jq is required to read ${_CONFIG_FILENAME} but was not found." >&2
     exit 1
   fi
   _cfg_url=$(jq -r '.url // empty' "$_CONFIG_FILE" 2>/dev/null || true)
@@ -58,20 +81,22 @@ fi
 
 if [[ -z "${GERRIT_URL:-}" ]]; then
   echo "ERROR: Gerrit base URL is not configured." >&2
-  echo "  → Set \"url\" in gerrit_config.json (copy scripts/gerrit_config.json.example to get started)" >&2
+  echo "  → Create: ${_WORKSPACE}/config/${_SKILL_NAME}/${_CONFIG_FILENAME}" >&2
+  echo "    (copy scripts/gerrit_config.json.example for the template)" >&2
   echo "  → Or: export GERRIT_URL='https://gerrit.example.com'" >&2
   exit 1
 fi
 if [[ -z "${GERRIT_USERNAME:-}" ]]; then
   echo "ERROR: Gerrit username is not configured." >&2
-  echo "  → Set \"username\" in gerrit_config.json (Gerrit → Settings → Profile → Username)" >&2
+  echo "  → Set \"username\" in ${_WORKSPACE}/config/${_SKILL_NAME}/${_CONFIG_FILENAME}" >&2
+  echo "    (Gerrit → Settings → Profile → Username)" >&2
   echo "  → Or: export GERRIT_USERNAME='john.doe'" >&2
   exit 1
 fi
 if [[ -z "${GERRIT_HTTP_PASSWORD:-}" ]]; then
   echo "ERROR: Gerrit HTTP password is not configured." >&2
-  echo "  → Set \"password\" in gerrit_config.json" >&2
-  echo "  → Generate it in Gerrit: Settings → HTTP Credentials → Generate Password" >&2
+  echo "  → Set \"password\" in ${_WORKSPACE}/config/${_SKILL_NAME}/${_CONFIG_FILENAME}" >&2
+  echo "    (Gerrit → Settings → HTTP Credentials → Generate Password)" >&2
   echo "  → Or: export GERRIT_HTTP_PASSWORD='your-token'" >&2
   exit 1
 fi

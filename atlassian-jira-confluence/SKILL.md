@@ -25,7 +25,22 @@ Credentials can be provided via a **config file** (preferred) or **environment v
 
 #### Option A: Config File (takes priority)
 
-Create `~/.atlassian.json` (home directory) **or** `.atlassian.json` in the current working directory. CWD file takes priority over the home-directory file.
+The config file is searched in the following priority order (highest first):
+
+| Priority | Path |
+|---|---|
+| 1 (**preferred**) | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` |
+| 2 | `{workspace}/config/.atlassian.json` |
+| 3 | `{workspace}/.atlassian.json` |
+| 4 | `{skill-dir}/.atlassian.json` *(dev/testing fallback)* |
+
+`{workspace}` is the current working directory. **Always create the config at the highest-priority path** so agents find it without extra configuration.
+
+```bash
+# Create config at the recommended location
+mkdir -p config/atlassian-jira-confluence
+# then fill in the file below
+```
 
 ```json
 {
@@ -69,20 +84,41 @@ Always use the `load_config()` + helper functions below so that the config-file-
 ```python
 import os
 import json
+from pathlib import Path
 from atlassian import Jira, Confluence
 
 
-def load_config():
-    """Return credentials dict from the first config file found, or {}."""
+_SKILL_NAME = "atlassian-jira-confluence"
+_CONFIG_FILENAME = ".atlassian.json"
+
+
+def load_config() -> dict:
+    """Return credentials dict from the first config file found, or {}.
+
+    Search priority (highest first):
+      1. {workspace}/config/atlassian-jira-confluence/.atlassian.json
+      2. {workspace}/config/.atlassian.json
+      3. {workspace}/.atlassian.json
+      4. {skill-dir}/.atlassian.json
+    """
+    workspace = Path(os.getcwd())
+    skill_dir = Path(__file__).resolve().parent  # adjust if script location differs
+
     candidates = [
-        os.path.join(os.getcwd(), ".atlassian.json"),   # CWD — highest priority
-        os.path.expanduser("~/.atlassian.json"),          # home directory
+        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
+        workspace / "config" / _CONFIG_FILENAME,
+        workspace / _CONFIG_FILENAME,
+        skill_dir / _CONFIG_FILENAME,
     ]
     for path in candidates:
-        if os.path.isfile(path):
+        if path.is_file():
             with open(path) as fh:
                 return json.load(fh)
     return {}
+
+
+def _preferred_config_path() -> str:
+    return str(Path(os.getcwd()) / "config" / _SKILL_NAME / _CONFIG_FILENAME)
 
 
 def is_cloud(url: str) -> bool:
@@ -97,7 +133,7 @@ def get_jira():
     if not url or not token:
         raise EnvironmentError(
             "Jira credentials missing.\n"
-            "  Config file : create ~/.atlassian.json with 'jira.url' and 'jira.token'\n"
+            f"  Config file : create {_preferred_config_path()} with 'jira.url' and 'jira.token'\n"
             "  Env vars    : set JIRA_URL and JIRA_PAT_TOKEN"
         )
     if is_cloud(url):
@@ -113,7 +149,7 @@ def get_confluence():
     if not url or not token:
         raise EnvironmentError(
             "Confluence credentials missing.\n"
-            "  Config file : create ~/.atlassian.json with 'confluence.url' and 'confluence.token'\n"
+            f"  Config file : create {_preferred_config_path()} with 'confluence.url' and 'confluence.token'\n"
             "  Env vars    : set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN"
         )
     if is_cloud(url):

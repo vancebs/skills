@@ -79,23 +79,59 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+_SKILL_NAME = "gerrit-api"
+_CONFIG_FILENAME = "gerrit_config.json"
+
+
 # ─── Config loading ───────────────────────────────────────────────────────────
+
+def _find_config_file(explicit_path: str | None) -> str | None:
+    """Return the first config file found, searching in priority order.
+
+    Priority:
+      1. explicit_path (if --config was specified)
+      2. {workspace}/config/{skill-name}/{filename}   ← preferred
+      3. {workspace}/config/{filename}
+      4. {workspace}/{filename}
+      5. {skill-dir}/{filename}                       ← dev/testing fallback
+
+    {workspace} = cwd when the script is invoked
+    {skill-dir} = gerrit-api/ directory (parent of this scripts/ folder)
+    """
+    if explicit_path:
+        return explicit_path if Path(explicit_path).is_file() else None
+
+    workspace = Path.cwd()
+    skill_dir = Path(__file__).parent.parent  # gerrit-api/
+
+    candidates = [
+        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
+        workspace / "config" / _CONFIG_FILENAME,
+        workspace / _CONFIG_FILENAME,
+        skill_dir / _CONFIG_FILENAME,
+    ]
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def _preferred_config_path() -> str:
+    """Return the recommended path at which the user should create the config file."""
+    return str(Path.cwd() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
 
 def load_config(config_path: str | None) -> dict:
     """Load credentials from config file (priority) then environment variables."""
     cfg: dict = {}
 
-    # 1. Config file
-    candidates = [config_path] if config_path else [str(Path.cwd() / "gerrit_config.json")]
-    for path in candidates:
-        if path and Path(path).is_file():
-            try:
-                with open(path) as f:
-                    file_cfg = json.load(f)
-                cfg.update(file_cfg)
-            except (json.JSONDecodeError, OSError) as e:
-                _err(f"Warning: could not read config file {path}: {e}")
-            break
+    found = _find_config_file(config_path)
+    if found:
+        try:
+            with open(found) as f:
+                cfg.update(json.load(f))
+            _err(f"Using config: {found}")
+        except (json.JSONDecodeError, OSError) as e:
+            _err(f"Warning: could not read config file {found}: {e}")
 
     # 2. Environment variable fallbacks
     _env_fallback(cfg, "url",          "GERRIT_URL")
@@ -143,19 +179,21 @@ def build_ssh_command(cfg: dict) -> list[str]:
     key  = cfg.get("ssh_key", "")
 
     if not host:
+        preferred = _preferred_config_path()
         raise RuntimeError(
             "SSH host could not be determined.\n"
             "  Fix one of the following:\n"
-            '  1. Add "ssh_host": "gerrit.example.com" to gerrit_config.json\n'
-            '  2. Ensure "url" is set in gerrit_config.json (ssh_host is derived from it)\n'
+            f'  1. Add "ssh_host": "gerrit.example.com" to {preferred}\n'
+            '  2. Ensure "url" is set in the config file (ssh_host is derived from it)\n'
             "  3. Set environment variable: GERRIT_SSH_HOST=gerrit.example.com"
         )
     if not user:
+        preferred = _preferred_config_path()
         raise RuntimeError(
             "SSH username could not be determined.\n"
             "  Fix one of the following:\n"
-            '  1. Add "ssh_username": "your-username" to gerrit_config.json\n'
-            '  2. Ensure "username" is set in gerrit_config.json (ssh_username defaults to it)\n'
+            f'  1. Add "ssh_username": "your-username" to {preferred}\n'
+            '  2. Ensure "username" is set in the config file (ssh_username defaults to it)\n'
             "  3. Set environment variable: GERRIT_SSH_USERNAME=your-username"
         )
 

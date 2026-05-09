@@ -48,7 +48,23 @@ Credentials are loaded with the following priority (highest first):
 
 #### Config File (`gerrit_config.json`)
 
-Copy `scripts/gerrit_config.json.example` to your agent's working directory as `gerrit_config.json` and fill in real values:
+The config file is searched in the following priority order (highest first):
+
+| Priority | Path |
+|---|---|
+| 1 (**preferred**) | `{workspace}/config/gerrit-api/gerrit_config.json` |
+| 2 | `{workspace}/config/gerrit_config.json` |
+| 3 | `{workspace}/gerrit_config.json` |
+| 4 | `{skill-dir}/gerrit_config.json` *(dev/testing fallback)* |
+
+`{workspace}` is the current working directory. **Always create the config at the highest-priority path** so all gerrit-api scripts find it without extra arguments.
+
+```bash
+# Create config at the recommended location
+mkdir -p config/gerrit-api
+cp /path/to/gerrit-api/scripts/gerrit_config.json.example config/gerrit-api/gerrit_config.json
+# then edit config/gerrit-api/gerrit_config.json with real values
+```
 
 ```json
 {
@@ -65,7 +81,7 @@ Copy `scripts/gerrit_config.json.example` to your agent's working directory as `
 The SSH fields are only needed for stream-events. `ssh_host` is inferred from `url` when absent.
 
 - Config file values take **priority** over environment variables.
-- Add `gerrit_config.json` to `.gitignore` — never commit credentials.
+- Add `config/gerrit-api/gerrit_config.json` to `.gitignore` — never commit credentials.
 - Each agent running in a different working directory can have its own config file.
 
 #### Environment Variables (fallback)

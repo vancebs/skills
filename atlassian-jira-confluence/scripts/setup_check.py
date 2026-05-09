@@ -6,21 +6,54 @@ import sys
 import subprocess
 import os
 import json
+from pathlib import Path
+
+
+_SKILL_NAME = "atlassian-jira-confluence"
+_CONFIG_FILENAME = ".atlassian.json"
+
+
+def _find_config_file() -> str | None:
+    """Return the first config file found, searching in priority order.
+
+    Priority:
+      1. {workspace}/config/{skill-name}/.atlassian.json   ← preferred
+      2. {workspace}/config/.atlassian.json
+      3. {workspace}/.atlassian.json
+      4. {skill-dir}/.atlassian.json                       ← dev/testing fallback
+
+    {workspace} = cwd when the script is invoked
+    {skill-dir} = atlassian-jira-confluence/ directory (parent of this scripts/ folder)
+    """
+    workspace = Path(os.getcwd())
+    skill_dir = Path(__file__).parent.parent  # atlassian-jira-confluence/
+
+    candidates = [
+        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
+        workspace / "config" / _CONFIG_FILENAME,
+        workspace / _CONFIG_FILENAME,
+        skill_dir / _CONFIG_FILENAME,
+    ]
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def _preferred_config_path() -> str:
+    """Return the recommended path at which the user should create the config file."""
+    return str(Path(os.getcwd()) / "config" / _SKILL_NAME / _CONFIG_FILENAME)
 
 
 def load_config():
-    """Return (config_dict, source_path) from the first .atlassian.json found, or ({}, None)."""
-    candidates = [
-        os.path.join(os.getcwd(), ".atlassian.json"),
-        os.path.expanduser("~/.atlassian.json"),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            try:
-                with open(path) as fh:
-                    return json.load(fh), path
-            except json.JSONDecodeError as e:
-                print(f"[WARN] Config file {path} is not valid JSON: {e}")
+    """Return (config_dict, source_path) from the first config file found, or ({}, None)."""
+    path = _find_config_file()
+    if path:
+        try:
+            with open(path) as fh:
+                return json.load(fh), path
+        except json.JSONDecodeError as e:
+            print(f"[WARN] Config file {path} is not valid JSON: {e}")
     return {}, None
 
 
@@ -51,7 +84,18 @@ def check_credentials():
     if config_path:
         print(f"[OK] Config file found: {config_path}")
     else:
-        print("[INFO] No config file found (~/.atlassian.json or ./.atlassian.json)")
+        preferred = _preferred_config_path()
+        print(f"[INFO] No config file found. Searched:")
+        workspace = Path(os.getcwd())
+        skill_dir = Path(__file__).parent.parent
+        for p in [
+            workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
+            workspace / "config" / _CONFIG_FILENAME,
+            workspace / _CONFIG_FILENAME,
+            skill_dir / _CONFIG_FILENAME,
+        ]:
+            print(f"         {p}")
+        print(f"[INFO] Recommended: create {preferred}")
 
     issues = []
 
@@ -93,8 +137,10 @@ def check_credentials():
         creds[svc] = {"url": url, "token": token, "username": username}
 
     if issues:
+        preferred = _preferred_config_path()
         print("\nTo fix missing credentials, choose one of:")
-        print("  Config file : create ~/.atlassian.json  (see SKILL.md for format)")
+        print(f"  Config file : create {preferred}")
+        print("                (see SKILL.md for the JSON format)")
         print("  Env vars    :")
         print("    Linux/macOS:        export VAR=value")
         print("    Windows CMD:        set VAR=value")
