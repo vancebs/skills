@@ -56,6 +56,9 @@ The config file is searched in the following priority order (highest first):
 | 2 | `{workspace}/config/gerrit_config.json` |
 | 3 | `{workspace}/gerrit_config.json` |
 | 4 | `{skill-dir}/gerrit_config.json` *(dev/testing fallback)* |
+| 5 | `$HOME/.config/gerrit-api/gerrit_config.json` |
+| 6 | `$HOME/.config/gerrit_config.json` |
+| 7 | `$HOME/gerrit_config.json` |
 
 `{workspace}` is the current working directory. **Always create the config at the highest-priority path** so all gerrit-api scripts find it without extra arguments.
 

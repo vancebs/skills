@@ -94,6 +94,9 @@ def _find_config_file(explicit_path: str | None) -> str | None:
       3. {workspace}/config/{filename}
       4. {workspace}/{filename}
       5. {skill-dir}/{filename}                       ← dev/testing fallback
+      6. $HOME/.config/{skill-name}/{filename}
+      7. $HOME/.config/{filename}
+      8. $HOME/{filename}
 
     {workspace} = cwd when the script is invoked
     {skill-dir} = gerrit-api/ directory (parent of this scripts/ folder)
@@ -103,12 +106,16 @@ def _find_config_file(explicit_path: str | None) -> str | None:
 
     workspace = Path.cwd()
     skill_dir = Path(__file__).parent.parent  # gerrit-api/
+    home = Path.home()
 
     candidates = [
         workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
         workspace / "config" / _CONFIG_FILENAME,
         workspace / _CONFIG_FILENAME,
         skill_dir / _CONFIG_FILENAME,
+        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
+        home / ".config" / _CONFIG_FILENAME,
+        home / _CONFIG_FILENAME,
     ]
     for path in candidates:
         if path.is_file():

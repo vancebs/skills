@@ -43,6 +43,9 @@ set -euo pipefail
 # 2. {workspace}/config/gerrit_config.json
 # 3. {workspace}/gerrit_config.json
 # 4. {skill dir}/gerrit_config.json                     ← dev/testing fallback
+# 5. $HOME/.config/gerrit-api/gerrit_config.json
+# 6. $HOME/.config/gerrit_config.json
+# 7. $HOME/gerrit_config.json
 #
 # {workspace} = current working directory when the script is invoked
 # {skill dir} = the gerrit-api/ directory (parent of this scripts/ folder)
@@ -51,13 +54,17 @@ _SKILL_NAME="gerrit-api"
 _CONFIG_FILENAME="gerrit_config.json"
 _WORKSPACE="$(pwd)"
 _SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_HOME_DIR="${HOME:-$(cd ~ && pwd)}"
 
 _CONFIG_FILE=""
 for _candidate in \
     "${_WORKSPACE}/config/${_SKILL_NAME}/${_CONFIG_FILENAME}" \
     "${_WORKSPACE}/config/${_CONFIG_FILENAME}" \
     "${_WORKSPACE}/${_CONFIG_FILENAME}" \
-    "${_SKILL_DIR}/${_CONFIG_FILENAME}"; do
+    "${_SKILL_DIR}/${_CONFIG_FILENAME}" \
+    "${_HOME_DIR}/.config/${_SKILL_NAME}/${_CONFIG_FILENAME}" \
+    "${_HOME_DIR}/.config/${_CONFIG_FILENAME}" \
+    "${_HOME_DIR}/${_CONFIG_FILENAME}"; do
   if [[ -f "$_candidate" ]]; then
     _CONFIG_FILE="$_candidate"
     break

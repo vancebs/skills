@@ -33,6 +33,9 @@ The config file is searched in the following priority order (highest first):
 | 2 | `{workspace}/config/.atlassian.json` |
 | 3 | `{workspace}/.atlassian.json` |
 | 4 | `{skill-dir}/.atlassian.json` *(dev/testing fallback)* |
+| 5 | `$HOME/.config/atlassian-jira-confluence/.atlassian.json` |
+| 6 | `$HOME/.config/.atlassian.json` |
+| 7 | `$HOME/.atlassian.json` |
 
 `{workspace}` is the current working directory. **Always create the config at the highest-priority path** so agents find it without extra configuration.
 
@@ -100,15 +103,22 @@ def load_config() -> dict:
       2. {workspace}/config/.atlassian.json
       3. {workspace}/.atlassian.json
       4. {skill-dir}/.atlassian.json
+      5. $HOME/.config/atlassian-jira-confluence/.atlassian.json
+      6. $HOME/.config/.atlassian.json
+      7. $HOME/.atlassian.json
     """
     workspace = Path(os.getcwd())
     skill_dir = Path(__file__).resolve().parent  # adjust if script location differs
+    home = Path.home()
 
     candidates = [
         workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
         workspace / "config" / _CONFIG_FILENAME,
         workspace / _CONFIG_FILENAME,
         skill_dir / _CONFIG_FILENAME,
+        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
+        home / ".config" / _CONFIG_FILENAME,
+        home / _CONFIG_FILENAME,
     ]
     for path in candidates:
         if path.is_file():
