@@ -104,46 +104,40 @@ export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # optional
 
 ### Tools
 
-- `curl` — used for all REST API calls
-- `jq` — used for JSON parsing and pretty-printing (also used to read the config file)
-- `base64` — used for decoding file content responses
-- `python3` (≥ 3.9) — used for `gerrit_stream_events.py` (stream-events listener)
+- `python3` (≥ 3.9) — used for all scripts (`gerrit_api.py`, `gerrit_stream_events.py`)
 - `ssh` — used by the stream-events listener to connect to Gerrit
 
 ## Quick Start
 
-Use the helper script at `scripts/gerrit_api.sh` for common operations.
+Use the cross-platform helper script at `scripts/gerrit_api.py` for REST API operations.
 
 ```bash
-# Make the script executable (one-time)
-chmod +x scripts/gerrit_api.sh
-
 # Query open changes
-./scripts/gerrit_api.sh query "status:open+limit:5"
+python scripts/gerrit_api.py query "status:open+limit:5"
 
 # Get change details
-./scripts/gerrit_api.sh get-change 12345
+python scripts/gerrit_api.py get-change 12345
 
 # List files changed in a revision
-./scripts/gerrit_api.sh list-files 12345
+python scripts/gerrit_api.py list-files 12345
 
 # Get a file diff
-./scripts/gerrit_api.sh get-diff 12345 "src/main/App.java"
+python scripts/gerrit_api.py get-diff 12345 "src/main/App.java"
 
 # Get raw file content
-./scripts/gerrit_api.sh get-content 12345 "src/main/App.java"
+python scripts/gerrit_api.py get-content 12345 "src/main/App.java"
 
 # Post a draft comment on a specific line
-./scripts/gerrit_api.sh create-draft 12345 current '{"path":"src/main/App.java","line":23,"message":"Consider renaming this.","unresolved":true}'
+python scripts/gerrit_api.py create-draft 12345 current '{"path":"src/main/App.java","line":23,"message":"Consider renaming this.","unresolved":true}'
 
 # Post a review with a Code-Review +1 label
-./scripts/gerrit_api.sh review 12345 current '{"message":"Looks good!","labels":{"Code-Review":1}}'
+python scripts/gerrit_api.py review 12345 current '{"message":"Looks good!","labels":{"Code-Review":1}}'
 
 # Submit a change
-./scripts/gerrit_api.sh submit 12345
+python scripts/gerrit_api.py submit 12345
 
 # Abandon a change
-./scripts/gerrit_api.sh abandon 12345
+python scripts/gerrit_api.py abandon 12345
 ```
 
 ## SSH Stream Events
@@ -650,15 +644,15 @@ curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
 ### Step 1 — Find changes to review
 
 ```bash
-./scripts/gerrit_api.sh query "status:open+reviewer:self+-owner:self"
+python scripts/gerrit_api.py query "status:open+reviewer:self+-owner:self"
 ```
 
 ### Step 2 — Inspect a change
 
 ```bash
-./scripts/gerrit_api.sh get-change 12345
-./scripts/gerrit_api.sh list-files 12345
-./scripts/gerrit_api.sh get-diff 12345 "path/to/file.java"
+python scripts/gerrit_api.py get-change 12345
+python scripts/gerrit_api.py list-files 12345
+python scripts/gerrit_api.py get-diff 12345 "path/to/file.java"
 ```
 
 ### Step 3 — Post your review
@@ -666,9 +660,9 @@ curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
 **Option A: Incremental Drafts**
 
 ```bash
-./scripts/gerrit_api.sh create-draft 12345 current '{"path":"path/to/file.java","line":42,"message":"Consider using a constant here instead of a magic number.","unresolved":true}'
+python scripts/gerrit_api.py create-draft 12345 current '{"path":"path/to/file.java","line":42,"message":"Consider using a constant here instead of a magic number.","unresolved":true}'
 
-./scripts/gerrit_api.sh review 12345 current '{
+python scripts/gerrit_api.py review 12345 current '{
   "message": "I left a few comments on the implementation. Please take a look.",
   "labels": {"Code-Review": -1},
   "drafts": "PUBLISH"
@@ -678,7 +672,7 @@ curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
 **Option B: Single Step Review**
 
 ```bash
-./scripts/gerrit_api.sh review 12345 current '{
+python scripts/gerrit_api.py review 12345 current '{
   "message": "Overall the approach looks solid. A few suggestions below.",
   "labels": {"Code-Review": 1},
   "comments": {
@@ -699,19 +693,17 @@ Additional `comments` fields:
 ### Step 4 — Submit when ready
 
 ```bash
-./scripts/gerrit_api.sh submit 12345
+python scripts/gerrit_api.py submit 12345
 ```
 
 ## Troubleshooting
 
 | Problem | Solution |
 |---|---|
-| `401 Unauthorized` | Check `GERRIT_USERNAME` and `GERRIT_HTTP_PASSWORD` (or config file). Re-generate the HTTP password in Gerrit Settings. |
-| `404 Not Found` | Verify the change number exists. Check `GERRIT_URL` has no trailing slash. Ensure the `/a/` prefix is present. |
-| `409 Conflict` | You may be trying to review a change edit, or submit a change that doesn't meet requirements. |
-| JSON parse error | Make sure you strip the XSSI prefix `)]}'\n` from the response before parsing. |
-| URL encoding issues | Project paths with `/` must use `%2F`. Use the helper script which handles this automatically. |
-| Config file not loaded | Ensure `gerrit_config.json` is in the **current working directory** when the script is run, not the script's own directory. |
+| `HTTP 401 Unauthorized` | Check `GERRIT_USERNAME` and `GERRIT_HTTP_PASSWORD` (or config file). Re-generate the HTTP password in Gerrit Settings. |
+| `HTTP 404 Not Found` | Verify the change number exists. Check `GERRIT_URL` has no trailing slash. |
+| `HTTP 409 Conflict` | You may be trying to review a change edit, or submit a change that doesn't meet requirements. |
+| Config file not loaded | The script searches 7 paths in priority order. Run `python scripts/gerrit_api.py help` to see the search order, and ensure the file is in one of those locations. |
 
 ## Awareness
 
@@ -720,9 +712,9 @@ Additional `comments` fields:
 
 ## Files
 
-- `scripts/gerrit_api.sh` — REST API helper script (reads `gerrit_config.json` first, then env vars)
+- `scripts/gerrit_api.py` — REST API helper script (cross-platform, Python, no extra deps)
 - `scripts/gerrit_stream_events.py` — SSH stream-events listener and event parser
-- `scripts/gerrit_config.json.example` — config file template; copy to your agent's working directory as `gerrit_config.json`
+- `scripts/gerrit_config.json.example` — config file template; copy to the recommended path
 
 ## References
 
