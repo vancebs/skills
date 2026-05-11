@@ -77,11 +77,14 @@ cp /path/to/gerrit-api/scripts/gerrit_config.json.example config/gerrit-api/gerr
   "ssh_host": "gerrit.example.com",
   "ssh_port": 29418,
   "ssh_username": "john.doe",
-  "ssh_key": "~/.ssh/id_rsa"
+  "ssh_key": "~/.ssh/id_rsa",
+  "hook_url": "http://127.0.0.1:8443/events",
+  "hook_token": "your-hook-token",
+  "outbox_path": ""
 }
 ```
 
-The SSH fields are only needed for stream-events. `ssh_host` is inferred from `url` when absent.
+The SSH and hook fields are optional. `ssh_host` is inferred from `url` when absent. `hook_url` / `hook_token` / `outbox_path` can also be provided via `--hook-url` / `--hook-token` / `--outbox` CLI flags or `HOOK_URL` / `HOOK_TOKEN` / `OUTBOX_PATH` env vars.
 
 - Config file values take **priority** over environment variables.
 - Add `config/gerrit-api/gerrit_config.json` to `.gitignore` — never commit credentials.
@@ -100,6 +103,10 @@ export GERRIT_SSH_HOST="gerrit.example.com"   # optional; derived from GERRIT_UR
 export GERRIT_SSH_PORT="29418"                 # optional; default 29418
 export GERRIT_SSH_USERNAME="john.doe"          # optional; defaults to GERRIT_USERNAME
 export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # optional
+# Hook delivery (optional)
+export HOOK_URL="http://127.0.0.1:8443/events"
+export HOOK_TOKEN="your-hook-token"
+export OUTBOX_PATH="/var/log/gerrit/events.outbox.jsonl"
 ```
 
 ### Tools
@@ -187,59 +194,16 @@ python3 scripts/gerrit_stream_events.py \
 
 ### Agent Patterns
 
-Agents can interact with the stream-events script in two ways:
+See the **Script Options Reference → Updated Agent Patterns** section below for full examples (Patterns A–D).
 
-#### Pattern A — Background listener + polling log file
-
-Start the listener in background mode (async bash), writing events to a file. Periodically read and process the file.
-
-```bash
-# Step 1: Start listener in background (async bash tool)
-python3 scripts/gerrit_stream_events.py \
-  --output events.jsonl \
-  --reconnect \
-  --quiet &
-
-# Step 2 (later): Read new events from the log file
-tail -n 50 events.jsonl | while IFS= read -r line; do
-  TYPE=$(echo "$line" | jq -r '.type')
-  CHANGE=$(echo "$line" | jq -r '.change.number // empty')
-  echo "Event: $TYPE on change $CHANGE"
-done
-```
-
-#### Pattern B — Bounded collection for batch processing
-
-Run the listener for a fixed number of events or time, then process them all:
-
-```bash
-# Collect events for 30 seconds
-python3 scripts/gerrit_stream_events.py \
-  --timeout 30 \
-  --filter patchset-created,change-merged \
-  > batch_events.jsonl
-
-# Process: auto-review each new patch set
-jq -r 'select(.type=="patchset-created") | "\(.change.number) \(.patchSet.number)"' \
-  batch_events.jsonl \
-  | while read change_id ps_num; do
-      ./scripts/gerrit_api.sh review "$change_id" "$ps_num" \
-        '{"message":"CI started","labels":{"Verified":0}}'
-    done
-```
-
-#### Pattern C — Pipe-based real-time processing
-
-Run the listener and pipe each event through a handler:
+For a quick pipe-based approach:
 
 ```bash
 python3 scripts/gerrit_stream_events.py \
   --filter patchset-created \
   | while IFS= read -r event; do
-      CHANGE=$(echo "$event" | jq -r '.change.number')
-      SUBJECT=$(echo "$event" | jq -r '.change.subject')
-      echo "New patch set on change $CHANGE: $SUBJECT"
-      # Trigger review, CI, or notification here
+      CHANGE=$(echo "$event" | python3 -c "import sys,json; e=json.load(sys.stdin); print(e['change']['number'])")
+      echo "New patch set on change $CHANGE"
     done
 ```
 
@@ -308,21 +272,152 @@ Every event emitted by the script has these additional fields added:
 ```
 python3 scripts/gerrit_stream_events.py [options]
 
-  --config FILE         Config file (default: gerrit_config.json in cwd)
+Config:
+  --config FILE         Config file (searches 7 default locations if omitted)
+
+Filtering:
   --filter TYPES        Comma-separated event types to include (default: all)
   --project NAMES       Comma-separated project names to filter
   --branch NAMES        Comma-separated branch names to filter
-  --output FILE         Append compact JSON events to FILE in addition to stdout
+
+File output:
+  --output PATH         Append events to PATH as compact JSONL
+  --no-output           Disable file output even if --output is set
+  --atomic-write        Atomic O_APPEND+fsync writes (default: on)
+  --no-atomic-write     Disable atomic file writes (compatibility mode)
+
+HTTP hook:
+  --hook-url URL        POST each event as JSON to this URL
+  --hook-token TOKEN    X-Auth-Token header value (never logged)
+  --hook-retries N      Max hook retries on 5xx/network error (default: 3)
+  --hook-timeout SECS   HTTP request timeout in seconds (default: 3)
+  --outbox PATH         Append undelivered events here
+                        (default: <workspace>/events.outbox.jsonl)
+
+Daemon / process:
+  --pid-file PATH       Write PID to PATH on startup; remove on clean exit
+  --dry-run             Parse and print events; skip all writes and hooks
+
+Stream control:
   --max-events N        Stop after N events (0 = unlimited)
   --timeout SECS        Stop after SECS seconds (0 = unlimited)
-  --reconnect           Reconnect automatically on connection loss
-  --reconnect-delay N   Seconds between reconnect attempts (default: 5)
-  --pretty              Pretty-print JSON output
+  --reconnect           Reconnect on connection loss (exponential back-off)
+  --reconnect-delay N   Initial reconnect delay in seconds (default: 5)
+
+Display:
+  --pretty              Pretty-print JSON output to stdout
   --summary             Emit one-line human-readable summaries instead of JSON
-  --quiet               Suppress log/status messages on stderr
+  --verbose             Enable DEBUG-level logging
+  --quiet               Suppress all log output
 ```
 
-## Gerrit Concepts
+### HTTP Hook
+
+When `--hook-url` is set, each accepted event is **POSTed** as JSON (same payload written to the JSONL file) to that URL.
+
+#### Request format
+
+```
+POST /your-path HTTP/1.1
+Content-Type: application/json
+X-Auth-Token: <token>          ← only when --hook-token is set
+
+{ "type": "patchset-created", "change": {...}, "_received_at": "...", "summary": "..." }
+```
+
+#### Response handling
+
+| HTTP status | Behaviour |
+|---|---|
+| 2xx | Delivered — done |
+| 4xx | Client error — **not retried** (bad token, wrong path, etc.) |
+| 5xx / network error / timeout | **Retry** up to `--hook-retries` times with exponential back-off (base 0.5 s × 2ⁿ ± 10 % jitter), then write to outbox |
+
+#### Outbox
+
+Events that exhaust all retries are appended to the outbox file (JSONL, same atomic-append semantics) so they can be replayed later.  Default path: `<workspace>/events.outbox.jsonl`.
+
+> [!WARNING]
+> Only point `--hook-url` at `127.0.0.1` or a UNIX socket in production.  If you must reach an external host, use TLS and rotate the token regularly.
+
+### Foreground / systemd Mode
+
+The script never daemonises itself.  Run it under `nohup &`, `systemd`, `supervisord`, or any process manager.  A minimal systemd unit:
+
+```ini
+[Unit]
+Description=Gerrit stream-events listener
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/gerrit/scripts/gerrit_stream_events.py \
+    --output /var/log/gerrit/events.jsonl \
+    --hook-url http://127.0.0.1:8443/events \
+    --hook-token *** \
+    --reconnect
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Updated Agent Patterns
+
+#### Pattern A — Background listener + polling log file (updated)
+
+```bash
+# Start listener: write file + push to hook, reconnect automatically
+python3 scripts/gerrit_stream_events.py \
+  --output events.jsonl \
+  --hook-url http://127.0.0.1:8443/events \
+  --hook-token MY_TOKEN \
+  --reconnect --quiet &
+
+# Later: read new events (reads only complete lines ending with \n)
+while IFS= read -r line; do
+  TYPE=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin)['type'])")
+  echo "Event: $TYPE"
+done < events.jsonl
+```
+
+#### Pattern B — Bounded collection for batch processing
+
+```bash
+python3 scripts/gerrit_stream_events.py \
+  --timeout 30 \
+  --filter patchset-created,change-merged \
+  > batch_events.jsonl
+
+# Process results
+python3 -c "
+import json, sys
+for line in sys.stdin:
+    ev = json.loads(line)
+    if ev['type'] == 'patchset-created':
+        print(ev['change']['number'], ev['patchSet']['number'])
+" < batch_events.jsonl
+```
+
+#### Pattern C — Dry-run debug (no writes)
+
+```bash
+python3 scripts/gerrit_stream_events.py \
+  --dry-run --summary --max-events 10
+```
+
+#### Pattern D — Only hook, outbox as safety net
+
+```bash
+python3 scripts/gerrit_stream_events.py \
+  --no-output \
+  --hook-url http://127.0.0.1:8443/events \
+  --hook-token MY_TOKEN \
+  --outbox /var/log/gerrit/events.outbox.jsonl \
+  --reconnect
+```
+
+
 
 ### Changes and Patch Sets
 - A **change** is a single reviewable unit (corresponds to one commit).

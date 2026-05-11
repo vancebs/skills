@@ -7,5 +7,10 @@
   "ssh_host": "gerrit.example.com",
   "ssh_port": 29418,
   "ssh_username": "john.doe",
-  "ssh_key": "~/.ssh/id_rsa"
+  "ssh_key": "~/.ssh/id_rsa",
+
+  "_comment_hook": "Optional HTTP hook for real-time event delivery.",
+  "hook_url": "http://127.0.0.1:8443/events",
+  "hook_token": "your-hook-token",
+  "outbox_path": ""
 }

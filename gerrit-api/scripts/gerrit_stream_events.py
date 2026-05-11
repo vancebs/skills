@@ -2,49 +2,78 @@
 """
 gerrit_stream_events.py — Listen to Gerrit SSH stream-events and parse them.
 
-Connects to Gerrit via SSH, subscribes to the stream-events feed, and emits
-parsed events as newline-delimited JSON to stdout (or a file).  Each output
-line is a self-contained JSON object — ideal for shell pipelines, agent tools,
-and log aggregators.
+Connects to Gerrit via SSH, subscribes to the stream-events feed, and delivers
+parsed events to stdout, an append-only JSONL file, and/or an HTTP hook
+endpoint.  Each event line is a self-contained JSON object enriched with
+_received_at and summary fields.
 
 Usage:
   python3 gerrit_stream_events.py [options]
 
-Options:
-  --config FILE       Config file path (default: gerrit_config.json in cwd)
-  --filter TYPE,...   Comma-separated event types to include (default: all)
-                      e.g. patchset-created,change-merged,comment-added
-  --project NAME,...  Comma-separated project names to filter (default: all)
-  --branch NAME,...   Comma-separated branch names to filter (default: all)
-  --output FILE       Append events to FILE in addition to stdout
-  --max-events N      Stop after N events (default: 0 = unlimited)
-  --timeout SECS      Stop after SECS seconds (default: 0 = unlimited)
-  --reconnect         Reconnect on connection loss (default: exit on loss)
-  --reconnect-delay N Seconds to wait before reconnecting (default: 5)
-  --pretty            Pretty-print JSON output (human-readable)
-  --summary           Emit a human-readable one-line summary per event
-  --quiet             Suppress all log messages to stderr
-  --help              Show this help
+─── File output ──────────────────────────────────────────────────────────────
+  --output PATH         Append events to PATH as compact JSONL (one event per
+                        line). Omit or leave empty to skip file output.
+  --no-output           Explicitly disable file output.
+  --atomic-write        Atomic append + fsync on every write (default: on).
+  --no-atomic-write     Disable atomic writes (compat mode; not recommended).
 
-Credentials (config file keys / environment variables):
-  ssh_host      / GERRIT_SSH_HOST      SSH hostname (extracted from url if absent)
+─── HTTP hook ────────────────────────────────────────────────────────────────
+  --hook-url URL        POST each event as JSON to this URL.
+                        Example: --hook-url http://127.0.0.1:8443/events
+  --hook-token TOKEN    Sent as X-Auth-Token header. Never logged. Can also be
+                        set via config key hook_token or env HOOK_TOKEN.
+  --hook-retries N      Max retries on 5xx/network error (default: 3).
+  --hook-timeout SECS   Per-request timeout in seconds (default: 3).
+  --outbox PATH         On hook failure, append missed events here for later
+                        replay. Default: <workspace>/events.outbox.jsonl.
+
+─── Daemon / process ─────────────────────────────────────────────────────────
+  --pid-file PATH       Write PID to PATH on startup; remove on clean exit.
+  --dry-run             Parse and print events; skip all file writes and hooks.
+
+─── Filtering ────────────────────────────────────────────────────────────────
+  --filter TYPE,...     Comma-separated event types (default: all).
+  --project NAME,...    Comma-separated project names to include.
+  --branch NAME,...     Comma-separated branch names to include.
+
+─── Stream control ───────────────────────────────────────────────────────────
+  --max-events N        Stop after N events (0 = unlimited).
+  --timeout SECS        Stop after SECS seconds (0 = unlimited).
+  --reconnect           Reconnect on connection loss (exponential backoff).
+  --reconnect-delay N   Initial reconnect delay in seconds (default: 5).
+
+─── Display ──────────────────────────────────────────────────────────────────
+  --pretty              Pretty-print JSON output to stdout.
+  --summary             Emit one-line human-readable summary per event.
+  --verbose             Enable DEBUG-level logging to stderr.
+  --quiet               Suppress all log output.
+
+─── Misc ─────────────────────────────────────────────────────────────────────
+  --config FILE         Config file path (searches 7 default locations).
+  --help                Show this help.
+
+Credentials (config file keys / env vars / CLI override priority: CLI > config > env):
+  ssh_host      / GERRIT_SSH_HOST      SSH hostname (derived from url if absent)
   ssh_port      / GERRIT_SSH_PORT      SSH port (default: 29418)
   ssh_username  / GERRIT_SSH_USERNAME  SSH username (falls back to username)
   ssh_key       / GERRIT_SSH_KEY       Path to SSH private key (optional)
+  hook_url      / HOOK_URL             HTTP hook URL
+  hook_token    / HOOK_TOKEN           HTTP hook token (never logged)
+  outbox_path   / OUTBOX_PATH          Outbox file path
 
 Event types emitted by Gerrit:
-  patchset-created    A new patch set was uploaded
-  change-merged       A change was merged/submitted
-  change-abandoned    A change was abandoned
-  change-restored     A change was restored
-  comment-added       A comment or review vote was posted
-  reviewer-added      A reviewer was added to a change
-  reviewer-deleted    A reviewer was removed from a change
-  topic-changed       A change topic was updated
-  hashtags-changed    Change hashtags were updated
-  vote-deleted        A review vote was deleted
-  ref-updated         A git ref was updated (push/delete)
-  project-created     A new project was created
+  patchset-created       A new patch set was uploaded
+  change-merged          A change was merged/submitted
+  change-abandoned       A change was abandoned
+  change-restored        A change was restored
+  comment-added          A comment or review vote was posted
+  reviewer-added         A reviewer was added to a change
+  reviewer-deleted       A reviewer was removed from a change
+  topic-changed          A change topic was updated
+  hashtags-changed       Change hashtags were updated
+  vote-deleted           A review vote was deleted
+  ref-updated            A git ref was updated (push/delete)
+  project-created        A new project was created
   pending-check-updated  A pending check was updated
 
 Examples:
@@ -54,29 +83,38 @@ Examples:
   # Filter to patch uploads and merges, pretty-print
   python3 gerrit_stream_events.py --filter patchset-created,change-merged --pretty
 
-  # Collect 20 events then exit
-  python3 gerrit_stream_events.py --max-events 20
+  # Write to file + push to hook, auto-reconnect (systemd / foreground)
+  python3 gerrit_stream_events.py \\
+    --output /var/log/gerrit/events.jsonl \\
+    --hook-url http://127.0.0.1:8443/events \\
+    --hook-token MY_TOKEN --reconnect
 
-  # Run for 60 seconds, log to file, reconnect on drop
-  python3 gerrit_stream_events.py --timeout 60 --output events.jsonl --reconnect
+  # Only hook, no file (outbox protects against delivery failures)
+  python3 gerrit_stream_events.py \\
+    --no-output --hook-url http://127.0.0.1:8443/events \\
+    --hook-token MY_TOKEN --reconnect
 
-  # Show one-line summaries on stdout
-  python3 gerrit_stream_events.py --summary
-
-  # Pipe into jq for further filtering
-  python3 gerrit_stream_events.py | jq 'select(.type == "patchset-created") | .summary'
+  # Dry-run: show summaries, no writes
+  python3 gerrit_stream_events.py --dry-run --summary
 """
 
 import argparse
 import json
+import logging
 import os
+import random
 import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Module-level logger — configured in _setup_logging() before first use.
+log = logging.getLogger("gerrit_stream_events")
 
 
 _SKILL_NAME = "gerrit-api"
@@ -136,9 +174,9 @@ def load_config(config_path: str | None) -> dict:
         try:
             with open(found) as f:
                 cfg.update(json.load(f))
-            _err(f"Using config: {found}")
+            log.info("Using config: %s", found)
         except (json.JSONDecodeError, OSError) as e:
-            _err(f"Warning: could not read config file {found}: {e}")
+            log.warning("Could not read config file %s: %s", found, e)
 
     # 2. Environment variable fallbacks
     _env_fallback(cfg, "url",          "GERRIT_URL")
@@ -384,84 +422,247 @@ def matches_filters(
     return True
 
 
+# ─── Logging setup ────────────────────────────────────────────────────────────
+
+def _setup_logging(verbose: bool, quiet: bool) -> None:
+    """Configure the module logger based on verbosity flags."""
+    if quiet:
+        log.setLevel(logging.CRITICAL)
+    elif verbose:
+        log.setLevel(logging.DEBUG)
+    else:
+        log.setLevel(logging.INFO)
+    if not log.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+        log.addHandler(handler)
+
+
+# ─── Atomic file write ────────────────────────────────────────────────────────
+
+def _atomic_append(path: str, data: bytes) -> None:
+    """Append *data* to *path* atomically using O_APPEND + fsync.
+
+    On POSIX systems, O_APPEND guarantees that concurrent writers cannot
+    interleave partial lines (kernel atomicity for writes ≤ PIPE_BUF).
+    fsync ensures data hits disk before this function returns.
+    On Windows, we use binary mode open + flush (best effort).
+    """
+    if os.name == "nt":  # Windows
+        with open(path, "ab") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    else:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def write_event_to_file(path: str, event: dict, atomic: bool) -> None:
+    """Serialise *event* as a JSONL line and append it to *path*."""
+    line = json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\n"
+    data = line.encode("utf-8")
+    try:
+        if atomic:
+            _atomic_append(path, data)
+        else:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+        log.debug("Wrote event to %s (len=%d)", path, len(data))
+    except OSError as e:
+        log.error("Failed to write event to %s: %s", path, e)
+
+
+# ─── HTTP hook delivery ───────────────────────────────────────────────────────
+
+def send_event_to_hook(
+    event: dict,
+    url: str,
+    token: str | None,
+    retries: int,
+    timeout: float,
+    outbox: str | None,
+    atomic: bool,
+) -> None:
+    """POST *event* to *url*, retrying on 5xx/network errors.
+
+    Retry strategy: exponential back-off starting at 0.5 s, doubling each
+    attempt, with ±10 % jitter.  4xx responses are not retried.
+    After all retries are exhausted the event is written to *outbox*.
+    The hook token is never written to logs.
+    """
+    body = json.dumps(event, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Auth-Token"] = token
+
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    last_error = "unknown error"
+
+    for attempt in range(retries + 1):
+        if attempt > 0:
+            base_delay = 0.5 * (2 ** (attempt - 1))
+            delay = base_delay * (1.0 + random.uniform(-0.1, 0.1))
+            log.warning("Hook POST failed %s; retrying (%d/%d) in %.1fs",
+                        last_error, attempt, retries, delay)
+            time.sleep(delay)
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status = resp.status
+                if 200 <= status < 300:
+                    log.debug("Hook POST succeeded (HTTP %d)", status)
+                    return
+                if 400 <= status < 500:
+                    log.error("Hook POST client error HTTP %d; not retrying", status)
+                    return
+                last_error = f"HTTP {status}"
+        except urllib.error.HTTPError as exc:
+            if 400 <= exc.code < 500:
+                log.error("Hook POST client error HTTP %d; not retrying", exc.code)
+                return
+            last_error = f"HTTP {exc.code}"
+        except Exception as exc:  # noqa: BLE001
+            last_error = type(exc).__name__
+
+    log.error("Hook failed after %d retries (%s); appended to outbox", retries, last_error)
+    if outbox:
+        try:
+            data = json.dumps(event, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"\n"
+            if atomic:
+                _atomic_append(outbox, data)
+            else:
+                with open(outbox, "ab") as f:
+                    f.write(data)
+        except OSError as exc:
+            log.error("Failed to write to outbox %s: %s", outbox, exc)
+
+
+# ─── SSH error guidance ───────────────────────────────────────────────────────
+
+def _log_ssh_error(stderr_output: str, cfg: dict) -> None:
+    """Log targeted SSH error guidance without leaking secrets."""
+    stderr_lc = stderr_output.lower()
+    ssh_key_info = cfg.get("ssh_key") or "(default keys from ~/.ssh/)"
+    if "permission denied" in stderr_lc or "publickey" in stderr_lc:
+        log.error("Auth failed. SSH user: %r, key: %s", cfg.get("ssh_username"), ssh_key_info)
+        log.error("Ensure your SSH public key is uploaded to Gerrit:")
+        log.error("  Gerrit web UI → Settings → SSH Keys → Add Key")
+    elif ("connection refused" in stderr_lc
+          or "connect to host" in stderr_lc
+          or "no route to host" in stderr_lc):
+        log.error("Cannot connect to %r port %s.", cfg.get("ssh_host"), cfg.get("ssh_port"))
+        log.error("Check ssh_host and ssh_port in gerrit_config.json.")
+        log.error("Test: ssh -p %s %s@%s gerrit version",
+                  cfg.get("ssh_port"), cfg.get("ssh_username"), cfg.get("ssh_host"))
+    elif "not allowed" in stderr_lc or "access denied" in stderr_lc:
+        log.error("This Gerrit account may lack 'Stream Events' capability.")
+        log.error("Ask a Gerrit admin to grant it under Global Capabilities.")
+    else:
+        log.warning("Verify gerrit_config.json: ssh_host=%r, ssh_port=%s, ssh_username=%r",
+                    cfg.get("ssh_host"), cfg.get("ssh_port"), cfg.get("ssh_username"))
+        log.warning("Test: ssh -p %s %s@%s gerrit version",
+                    cfg.get("ssh_port"), cfg.get("ssh_username"), cfg.get("ssh_host"))
+
+
 # ─── Output ───────────────────────────────────────────────────────────────────
 
-def emit_event(event: dict, out_file, pretty: bool, show_summary: bool) -> None:
+def emit_event(event: dict, pretty: bool, show_summary: bool) -> None:
+    """Print event to stdout."""
     if show_summary:
-        line = event["summary"]
+        print(event["summary"], flush=True)
     elif pretty:
-        line = json.dumps(event, indent=2, ensure_ascii=False)
+        print(json.dumps(event, indent=2, ensure_ascii=False), flush=True)
     else:
-        line = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
-
-    print(line, flush=True)
-    if out_file:
-        # Always write compact JSON to file regardless of display mode
-        out_file.write(
-            json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\n"
-        )
-        out_file.flush()
-
-
-# ─── Stream loop ─────────────────────────────────────────────────────────────
-
-def _err(msg: str) -> None:
-    print(msg, file=sys.stderr, flush=True)
+        print(json.dumps(event, separators=(",", ":"), ensure_ascii=False), flush=True)
 
 
 def stream_events(args: argparse.Namespace) -> int:
     """Main event streaming loop. Returns exit code."""
+    _setup_logging(getattr(args, "verbose", False), args.quiet)
     cfg = load_config(args.config)
 
-    type_filter    = set(f.strip() for f in args.filter.split(",") if f.strip()) if args.filter else set()
+    type_filter    = set(f.strip() for f in args.filter.split(",")  if f.strip()) if args.filter  else set()
     project_filter = set(p.strip() for p in args.project.split(",") if p.strip()) if args.project else set()
-    branch_filter  = set(b.strip() for b in args.branch.split(",") if b.strip()) if args.branch else set()
+    branch_filter  = set(b.strip() for b in args.branch.split(",")  if b.strip()) if args.branch  else set()
 
     try:
         ssh_cmd = build_ssh_command(cfg)
-    except RuntimeError as e:
-        _err(f"ERROR: {e}")
+    except RuntimeError as exc:
+        log.error("%s", exc)
         return 1
 
-    if not args.quiet:
-        host = cfg.get("ssh_host", "?")
-        port = cfg.get("ssh_port", 29418)
-        user = cfg.get("ssh_username", "?")
-        _err(f"Connecting to {user}@{host}:{port} …")
-        if type_filter:
-            _err(f"Filtering event types: {sorted(type_filter)}")
-        if project_filter:
-            _err(f"Filtering projects: {sorted(project_filter)}")
-        if branch_filter:
-            _err(f"Filtering branches: {sorted(branch_filter)}")
+    log.info("Connecting to %s@%s:%s …",
+             cfg.get("ssh_username"), cfg.get("ssh_host"), cfg.get("ssh_port"))
+    if type_filter:
+        log.info("Filtering event types: %s", sorted(type_filter))
+    if project_filter:
+        log.info("Filtering projects: %s", sorted(project_filter))
+    if branch_filter:
+        log.info("Filtering branches: %s", sorted(branch_filter))
+
+    # ── Resolve output path ──────────────────────────────────────────────────
+    output_path: str | None = None
+    if not getattr(args, "no_output", False) and args.output:
+        output_path = args.output
+
+    # ── Resolve hook settings (CLI > config > env) ───────────────────────────
+    hook_url   = args.hook_url   or cfg.get("hook_url")   or os.environ.get("HOOK_URL",   "")
+    hook_token = args.hook_token or cfg.get("hook_token") or os.environ.get("HOOK_TOKEN", "")
+
+    # ── Resolve outbox path ──────────────────────────────────────────────────
+    outbox_path: str | None = (
+        args.outbox
+        or cfg.get("outbox_path")
+        or os.environ.get("OUTBOX_PATH", "")
+        or (str(Path.cwd() / "events.outbox.jsonl") if hook_url else None)
+    ) or None
+
+    if args.dry_run:
+        log.info("DRY RUN mode: events will be parsed and printed, but not written or POSTed")
+
+    # ── PID file ─────────────────────────────────────────────────────────────
+    pid_file_path: str | None = None
+    if getattr(args, "pid_file", ""):
+        try:
+            Path(args.pid_file).write_text(str(os.getpid()), encoding="utf-8")
+            log.debug("PID %d written to %s", os.getpid(), args.pid_file)
+            pid_file_path = args.pid_file
+        except OSError as exc:
+            log.warning("Could not write PID file %s: %s", args.pid_file, exc)
 
     deadline = time.monotonic() + args.timeout if args.timeout > 0 else None
     max_events = args.max_events
-    reconnect_delay = args.reconnect_delay
 
-    # Set up graceful shutdown on SIGINT / SIGTERM
+    # Exponential backoff state for reconnects
+    current_reconnect_delay = args.reconnect_delay
+    _MAX_RECONNECT_DELAY = 60
+
+    # ── Graceful shutdown ────────────────────────────────────────────────────
     _stop = [False]
-    def _handle_signal(sig, frame):
+
+    def _handle_signal(sig: int, _frame: object) -> None:
+        log.info("Signal %d received; stopping …", sig)
         _stop[0] = True
+
     signal.signal(signal.SIGINT,  _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
-
-    out_file = None
-    if args.output:
-        out_file = open(args.output, "a", encoding="utf-8")
 
     event_count = 0
     exit_code = 0
 
     try:
         while not _stop[0]:
-            # Check deadline before each (re)connect
             if deadline and time.monotonic() >= deadline:
-                if not args.quiet:
-                    _err("Timeout reached, exiting.")
+                log.info("Timeout reached, exiting.")
                 break
 
             proc = None
+            connected_ok = False
             try:
                 proc = subprocess.Popen(
                     ssh_cmd,
@@ -470,9 +671,9 @@ def stream_events(args: argparse.Namespace) -> int:
                     text=True,
                     bufsize=1,
                 )
-
-                if not args.quiet:
-                    _err(f"Connected. Listening for events (PID {proc.pid}) …")
+                log.info("Connected. Listening for events (PID %d) …", proc.pid)
+                connected_ok = True
+                current_reconnect_delay = args.reconnect_delay  # reset on success
 
                 for raw_line in proc.stdout:  # type: ignore[union-attr]
                     if _stop[0]:
@@ -487,12 +688,27 @@ def stream_events(args: argparse.Namespace) -> int:
                     if not matches_filters(event, type_filter, project_filter, branch_filter):
                         continue
 
-                    emit_event(event, out_file, args.pretty, args.summary)
+                    # 1. Emit to stdout
+                    emit_event(event, args.pretty, args.summary)
                     event_count += 1
 
+                    if not args.dry_run:
+                        # 2. Persist to file first (safety net before push)
+                        if output_path:
+                            write_event_to_file(output_path, event, args.atomic_write)
+                        # 3. Send to HTTP hook
+                        if hook_url:
+                            send_event_to_hook(
+                                event, hook_url, hook_token or None,
+                                args.hook_retries, args.hook_timeout,
+                                outbox_path, args.atomic_write,
+                            )
+                    else:
+                        log.debug("dry-run: skipped file/hook for event type=%s",
+                                  event.get("type"))
+
                     if max_events > 0 and event_count >= max_events:
-                        if not args.quiet:
-                            _err(f"Reached max-events={max_events}, exiting.")
+                        log.info("Reached max-events=%d, exiting.", max_events)
                         _stop[0] = True
                         break
 
@@ -503,54 +719,25 @@ def stream_events(args: argparse.Namespace) -> int:
                     break
 
                 if proc.returncode != 0:
-                    if not args.quiet:
-                        _err(f"SSH process exited with code {proc.returncode}.")
-                        if stderr_output:
-                            _err(f"SSH stderr: {stderr_output}")
-                        # Targeted guidance based on error type
-                        stderr_lc = stderr_output.lower()
-                        ssh_key_info = cfg.get("ssh_key") or "(default keys from ~/.ssh/)"
-                        if "permission denied" in stderr_lc or "publickey" in stderr_lc:
-                            _err(f"  → Auth failed. SSH user: {cfg.get('ssh_username')!r}, "
-                                 f"key: {ssh_key_info}")
-                            _err("  → Ensure your SSH public key is uploaded to Gerrit:")
-                            _err("    Gerrit web UI → Settings → SSH Keys → Add Key")
-                        elif ("connection refused" in stderr_lc
-                              or "connect to host" in stderr_lc
-                              or "no route to host" in stderr_lc):
-                            _err(f"  → Cannot connect to {cfg.get('ssh_host')!r} "
-                                 f"port {cfg.get('ssh_port')}.")
-                            _err("  → Check ssh_host and ssh_port in gerrit_config.json.")
-                            _err(f"  → Test: ssh -p {cfg.get('ssh_port')} "
-                                 f"{cfg.get('ssh_username')}@{cfg.get('ssh_host')} gerrit version")
-                        elif "not allowed" in stderr_lc or "access denied" in stderr_lc:
-                            _err("  → This Gerrit account may lack 'Stream Events' capability.")
-                            _err("    Ask a Gerrit admin to grant it under Global Capabilities.")
-                        else:
-                            _err(f"  → Verify gerrit_config.json: "
-                                 f"ssh_host={cfg.get('ssh_host')!r}, "
-                                 f"ssh_port={cfg.get('ssh_port')}, "
-                                 f"ssh_username={cfg.get('ssh_username')!r}")
-                            _err(f"  → Test: ssh -p {cfg.get('ssh_port')} "
-                                 f"{cfg.get('ssh_username')}@{cfg.get('ssh_host')} gerrit version")
+                    log.warning("SSH process exited with code %d.", proc.returncode)
+                    if stderr_output:
+                        log.debug("SSH stderr: %s", stderr_output)
+                    _log_ssh_error(stderr_output, cfg)
                     if not args.reconnect:
                         exit_code = proc.returncode or 1
                         break
                 else:
-                    if not args.quiet:
-                        _err("SSH connection closed normally.")
+                    log.info("SSH connection closed normally.")
                     if not args.reconnect:
                         break
 
-            except OSError as e:
-                if not args.quiet:
-                    _err(f"SSH launch error: {e}")
-                    if "No such file" in str(e) or "not found" in str(e).lower():
-                        _err("  → 'ssh' is not installed or not in PATH. Install OpenSSH.")
-                    else:
-                        _err(f"  → Verify: ssh_host={cfg.get('ssh_host')!r}, "
-                             f"ssh_port={cfg.get('ssh_port')}, "
-                             f"ssh_username={cfg.get('ssh_username')!r}")
+            except OSError as exc:
+                log.warning("SSH launch error: %s", exc)
+                if "No such file" in str(exc) or "not found" in str(exc).lower():
+                    log.error("'ssh' is not installed or not in PATH. Install OpenSSH.")
+                else:
+                    log.debug("Verify: ssh_host=%r, ssh_port=%s, ssh_username=%r",
+                              cfg.get("ssh_host"), cfg.get("ssh_port"), cfg.get("ssh_username"))
                 if not args.reconnect:
                     exit_code = 1
                     break
@@ -563,20 +750,27 @@ def stream_events(args: argparse.Namespace) -> int:
                         proc.kill()
 
             if args.reconnect and not _stop[0]:
-                if not args.quiet:
-                    _err(f"Reconnecting in {reconnect_delay}s …")
-                for _ in range(reconnect_delay * 10):
+                log.info("Reconnecting in %ds …", current_reconnect_delay)
+                for _ in range(current_reconnect_delay * 10):
                     if _stop[0]:
                         break
                     time.sleep(0.1)
+                if not connected_ok:
+                    # Back off only when the connect itself failed (not a mid-stream drop)
+                    current_reconnect_delay = min(
+                        current_reconnect_delay * 2, _MAX_RECONNECT_DELAY
+                    )
 
     finally:
-        if out_file:
-            out_file.close()
-        if not args.quiet:
-            _err(f"Done. Total events emitted: {event_count}")
+        if pid_file_path:
+            try:
+                Path(pid_file_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        log.info("Done. Total events emitted: %d", event_count)
 
     return exit_code
+
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────
@@ -589,31 +783,62 @@ def main() -> None:
         epilog=__doc__,
         add_help=False,
     )
-    parser.add_argument("--config",          metavar="FILE",   default=None,
-                        help="Config file (default: gerrit_config.json in cwd)")
-    parser.add_argument("--filter",          metavar="TYPES",  default="",
+    # ── Config ────────────────────────────────────────────────────────────────
+    parser.add_argument("--config", metavar="FILE", default=None,
+                        help="Config file (searches 7 default locations if omitted)")
+    # ── Filtering ─────────────────────────────────────────────────────────────
+    parser.add_argument("--filter",  metavar="TYPES", default="",
                         help="Comma-separated event types to include (default: all)")
-    parser.add_argument("--project",         metavar="NAMES",  default="",
+    parser.add_argument("--project", metavar="NAMES", default="",
                         help="Comma-separated project names to filter")
-    parser.add_argument("--branch",          metavar="NAMES",  default="",
+    parser.add_argument("--branch",  metavar="NAMES", default="",
                         help="Comma-separated branch names to filter")
-    parser.add_argument("--output",          metavar="FILE",   default="",
-                        help="Append events to FILE (compact JSON) in addition to stdout")
-    parser.add_argument("--max-events",      metavar="N",      type=int, default=0,
+    # ── File output ───────────────────────────────────────────────────────────
+    parser.add_argument("--output", metavar="PATH", default="",
+                        help="Append events to PATH as compact JSONL")
+    parser.add_argument("--no-output", action="store_true",
+                        help="Disable file output even if --output is set")
+    parser.add_argument("--atomic-write", dest="atomic_write",
+                        action="store_true", default=True,
+                        help="Atomic O_APPEND+fsync writes (default: on)")
+    parser.add_argument("--no-atomic-write", dest="atomic_write",
+                        action="store_false",
+                        help="Disable atomic file writes (compatibility mode)")
+    # ── HTTP hook ─────────────────────────────────────────────────────────────
+    parser.add_argument("--hook-url", metavar="URL", default="",
+                        help="POST each event as JSON to this URL")
+    parser.add_argument("--hook-token", metavar="TOKEN", default="",
+                        help="X-Auth-Token header value (never logged)")
+    parser.add_argument("--hook-retries", metavar="N", type=int, default=3,
+                        help="Max hook retries on 5xx/network error (default: 3)")
+    parser.add_argument("--hook-timeout", metavar="SECS", type=float, default=3.0,
+                        help="HTTP request timeout in seconds (default: 3)")
+    parser.add_argument("--outbox", metavar="PATH", default="",
+                        help="Append undelivered events here (default: events.outbox.jsonl)")
+    # ── Daemon / process ──────────────────────────────────────────────────────
+    parser.add_argument("--pid-file", metavar="PATH", default="",
+                        help="Write PID to PATH on startup; remove on clean exit")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Parse and print events; skip all file writes and hooks")
+    # ── Stream control ────────────────────────────────────────────────────────
+    parser.add_argument("--max-events",      metavar="N",    type=int, default=0,
                         help="Stop after N events (0 = unlimited)")
-    parser.add_argument("--timeout",         metavar="SECS",   type=int, default=0,
+    parser.add_argument("--timeout",         metavar="SECS", type=int, default=0,
                         help="Stop after SECS seconds (0 = unlimited)")
     parser.add_argument("--reconnect",       action="store_true",
-                        help="Reconnect on connection loss")
-    parser.add_argument("--reconnect-delay", metavar="N",      type=int, default=5,
-                        help="Seconds to wait before reconnecting (default: 5)")
-    parser.add_argument("--pretty",          action="store_true",
-                        help="Pretty-print JSON output")
-    parser.add_argument("--summary",         action="store_true",
+                        help="Reconnect on connection loss (exponential back-off)")
+    parser.add_argument("--reconnect-delay", metavar="N", type=int, default=5,
+                        help="Initial reconnect delay in seconds (default: 5)")
+    # ── Display ───────────────────────────────────────────────────────────────
+    parser.add_argument("--pretty",  action="store_true",
+                        help="Pretty-print JSON output to stdout")
+    parser.add_argument("--summary", action="store_true",
                         help="Emit one-line human-readable summaries instead of JSON")
-    parser.add_argument("--quiet",           action="store_true",
-                        help="Suppress log messages to stderr")
-    parser.add_argument("--help", "-h",      action="help",
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable DEBUG-level logging")
+    parser.add_argument("--quiet",   action="store_true",
+                        help="Suppress all log output")
+    parser.add_argument("--help", "-h", action="help",
                         help="Show this help and exit")
 
     args = parser.parse_args()
