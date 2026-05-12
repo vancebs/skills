@@ -2,7 +2,7 @@
 name: gerrit-api
 description: Interact with Gerrit Code Review via the REST API — query changes, fetch diffs, post reviews with labels and inline comments, and manage change lifecycle. Also supports real-time event streaming via SSH (stream-events).
 license: Apache-2.0
-compatibility: Requires git, curl, jq, and base64. Requires python3 (≥3.9) and ssh for stream-events. Optional python3 for URL encoding.
+compatibility: Requires python3 (≥3.9) and ssh. All scripts use Python stdlib only — no pip install needed.
 metadata:
   based-on: https://github.com/yurnov/gerrit-in-5-min (gerrit-review skill by @yurnov)
   keywords: [gerrit, code review, code review automation, developer tools, stream-events, ssh]
@@ -10,65 +10,72 @@ metadata:
 
 # Gerrit API Skill
 
-This skill enables you to interact with a Gerrit Code Review instance through its REST API and real-time SSH event stream. Use it to query open changes, read diffs, post code reviews, manage change lifecycle (submit, abandon, restore), and **continuously listen for Gerrit events** (new patch sets, merges, comments, and more).
+**What this skill does:** Query Gerrit changes, read diffs, post code reviews, manage change lifecycle (submit / abandon / restore), and listen to real-time SSH event streams.
 
-Compared to the upstream `gerrit-review` skill, this version adds **config file support** so that multiple agents can each maintain their own credentials without conflicting environment variables, and **SSH stream-events support** for real-time change processing.
+**Scripts (no pip install needed):**
+- `scripts/gerrit_api.py` — REST API operations (cross-platform, Python stdlib)
+- `scripts/gerrit_stream_events.py` — SSH stream-events listener
 
-## Prerequisites
+---
 
-### Credentials — Config File or Environment Variables
+## ⚠️ Step 0 — Record Workspace (Do This First, Every Session)
 
-Credentials are loaded with the following priority (highest first):
-
-1. **Config file** — `gerrit_config.json` in the current working directory
-2. **Environment variables** — fallback when no config file is present
-
-#### REST API credentials
-
-| Credential | Config file key | Environment variable | Description |
-|---|---|---|---|
-| Base URL | `url` | `GERRIT_URL` | Base URL of the Gerrit instance (no trailing slash) |
-| Username | `username` | `GERRIT_USERNAME` | HTTP username from Gerrit → Settings → Profile |
-| HTTP password | `password` | `GERRIT_HTTP_PASSWORD` | Token from Gerrit → Settings → HTTP Credentials → Generate Password |
-
-> [!IMPORTANT]
-> The **HTTP password** is NOT the user's login password. It is a separate token generated in the Gerrit web UI under **Settings → HTTP Credentials → Generate Password**.
-
-#### SSH stream-events credentials
-
-| Credential | Config file key | Environment variable | Description |
-|---|---|---|---|
-| SSH host | `ssh_host` | `GERRIT_SSH_HOST` | Hostname for SSH (defaults to host extracted from `url`) |
-| SSH port | `ssh_port` | `GERRIT_SSH_PORT` | SSH port (default: `29418`) |
-| SSH username | `ssh_username` | `GERRIT_SSH_USERNAME` | SSH username (defaults to `username`) |
-| SSH key | `ssh_key` | `GERRIT_SSH_KEY` | Path to SSH private key (optional; uses SSH agent/default keys if absent) |
-
-> [!IMPORTANT]
-> The SSH user's public key must be uploaded to Gerrit under **Settings → SSH Keys**. The Gerrit SSH port is usually **29418** (not 22).
-
-#### Config File (`gerrit_config.json`)
-
-The config file is searched in the following priority order (highest first):
-
-| Priority | Path |
-|---|---|
-| 1 (**preferred**) | `{workspace}/config/gerrit-api/gerrit_config.json` |
-| 2 | `{workspace}/config/gerrit_config.json` |
-| 3 | `{workspace}/gerrit_config.json` |
-| 4 | `{skill-dir}/gerrit_config.json` *(dev/testing fallback)* |
-| 5 | `$HOME/.config/gerrit-api/gerrit_config.json` |
-| 6 | `$HOME/.config/gerrit_config.json` |
-| 7 | `$HOME/gerrit_config.json` |
-
-`{workspace}` is the current working directory. **Always create the config at the highest-priority path** so all gerrit-api scripts find it without extra arguments.
+> **Problem:** If you `cd` to a different directory during a task, relative paths break and config files cannot be found.
+>
+> **Fix:** Capture the workspace as an absolute path at the very start, before any other commands.
 
 ```bash
-# Create config at the recommended location
-mkdir -p config/gerrit-api
-cp /path/to/gerrit-api/scripts/gerrit_config.json.example config/gerrit-api/gerrit_config.json
-# then edit config/gerrit-api/gerrit_config.json with real values
+# Linux / macOS / Git Bash
+export SKILL_WORKSPACE="$(pwd)"
+
+# Windows CMD
+set SKILL_WORKSPACE=%CD%
+
+# Windows PowerShell
+$env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
+**Then always call scripts with an absolute path:**
+```bash
+# ✅ Correct — works no matter what directory you are in later
+python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+limit:5"
+
+# ❌ Wrong — breaks if you cd somewhere else before calling
+python3 scripts/gerrit_api.py query "status:open+limit:5"
+```
+
+The scripts automatically read `SKILL_WORKSPACE` to locate the config file. You can also pass it explicitly:
+```bash
+python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" --workspace "$SKILL_WORKSPACE" ...
+```
+
+---
+
+## ✅ Setup Checklist
+
+Complete these steps once before using the skill.
+
+### Step 1 — Verify Prerequisites
+
+```bash
+python3 --version   # must be ≥ 3.9
+ssh -V              # must be installed (for stream-events only)
+```
+
+### Step 2 — Create Config File
+
+```bash
+# Create directory at the recommended (highest-priority) location
+mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
+
+# Copy the template
+cp "$SKILL_WORKSPACE/scripts/gerrit_config.json.example" \
+   "$SKILL_WORKSPACE/config/gerrit-api/gerrit_config.json"
+
+# Edit with your real credentials
+```
+
+Config file content:
 ```json
 {
   "url": "https://gerrit.example.com",
@@ -78,133 +85,316 @@ cp /path/to/gerrit-api/scripts/gerrit_config.json.example config/gerrit-api/gerr
   "ssh_port": 29418,
   "ssh_username": "john.doe",
   "ssh_key": "~/.ssh/id_rsa",
-  "hook_url": "http://127.0.0.1:8443/events",
-  "hook_token": "your-hook-token",
+  "hook_url": "",
+  "hook_token": "",
   "outbox_path": ""
 }
 ```
 
-The SSH and hook fields are optional. `ssh_host` is inferred from `url` when absent. `hook_url` / `hook_token` / `outbox_path` can also be provided via `--hook-url` / `--hook-token` / `--outbox` CLI flags or `HOOK_URL` / `HOOK_TOKEN` / `OUTBOX_PATH` env vars.
+> **IMPORTANT — HTTP Password:** This is NOT your Gerrit login password. Generate it at: **Gerrit web UI → Settings → HTTP Credentials → Generate Password**
+>
+> **IMPORTANT — SSH Key:** For stream-events, your SSH public key must be uploaded at: **Gerrit web UI → Settings → SSH Keys → Add Key**
 
-- Config file values take **priority** over environment variables.
-- Add `config/gerrit-api/gerrit_config.json` to `.gitignore` — never commit credentials.
-- Each agent running in a different working directory can have its own config file.
+Add to `.gitignore`:
+```
+config/gerrit-api/gerrit_config.json
+```
 
-#### Environment Variables (fallback)
-
-When no config file is present, credentials come from environment variables:
+### Step 3 — Test the Connection
 
 ```bash
-# Linux/macOS
+python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+limit:1"
+```
+
+Expected: JSON output with change data. If you see an error, see **Troubleshooting** below.
+
+### Step 4 — (Stream Events Only) Test SSH Connection
+
+```bash
+ssh -p 29418 john.doe@gerrit.example.com gerrit version
+```
+
+Expected: `gerrit version 3.x.x`
+
+---
+
+## ⚡ Quick Reference — REST API Commands
+
+All commands follow the pattern: `python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" <command> [args]`
+
+| Task | Command |
+|---|---|
+| Query open changes | `query "status:open+limit:10"` |
+| Get change details | `get-change <change-id>` |
+| List changed files | `list-files <change-id>` |
+| Get file diff | `get-diff <change-id> "path/to/file.java"` |
+| Get file content | `get-content <change-id> "path/to/file.java"` |
+| Post review + label | `review <change-id> current '<json>'` |
+| Post draft comment | `create-draft <change-id> current '<json>'` |
+| Submit a change | `submit <change-id>` |
+| Abandon a change | `abandon <change-id>` |
+| Restore a change | `restore <change-id>` |
+| Add a reviewer | `add-reviewer <change-id> <email>` |
+| Set topic | `set-topic <change-id> <topic>` |
+
+Use `current` as the revision to target the latest patch set.
+
+---
+
+## 📋 Task Workflows
+
+### Workflow A — Review a Change (Step-by-Step Checklist)
+
+Use this when you need to perform a code review on a Gerrit change.
+
+**Checklist:**
+- [ ] 1. Record workspace: `export SKILL_WORKSPACE="$(pwd)"`
+- [ ] 2. Find changes needing review:
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+reviewer:self+-owner:self"
+  ```
+- [ ] 3. Get the change details for change `<id>`:
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" get-change <id>
+  ```
+- [ ] 4. List modified files:
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" list-files <id>
+  ```
+- [ ] 5. Review each file's diff:
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" get-diff <id> "path/to/file.java"
+  ```
+- [ ] 6. Post review (choose one option):
+
+  **Option A — Inline comments + label in one call:**
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" review <id> current '{
+    "message": "Review comment here.",
+    "labels": {"Code-Review": 1},
+    "comments": {
+      "path/to/file.java": [
+        {"line": 42, "message": "Consider a constant here.", "unresolved": true}
+      ]
+    }
+  }'
+  ```
+
+  **Option B — Draft comments first, then publish:**
+  ```bash
+  # Add draft (repeat for each comment)
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" create-draft <id> current \
+    '{"path":"path/to/file.java","line":42,"message":"Consider a constant.","unresolved":true}'
+  # Publish all drafts with a label
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" review <id> current \
+    '{"message":"See inline comments.","labels":{"Code-Review":-1},"drafts":"PUBLISH"}'
+  ```
+
+- [ ] 7. (Optional) Submit if approved:
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" submit <id>
+  ```
+
+**Label values** (project-specific, typical):
+- `Code-Review`: `-2` reject, `-1` needs work, `0` neutral, `+1` looks good, `+2` approved
+- `Verified`: `-1` fails, `0` neutral, `+1` verified
+
+---
+
+### Workflow B — Monitor Events with Stream Listener (Step-by-Step Checklist)
+
+Use this when you need to react to Gerrit events in real time or collect events for batch processing.
+
+**Decide your mode first:**
+
+| Mode | When to use | Command flag |
+|---|---|---|
+| Write to file only | Collect events for later processing | `--output` |
+| Push to HTTP hook only | Deliver to a local service | `--no-output --hook-url` |
+| Both (recommended for prod) | File as safety net + hook for real-time | `--output --hook-url` |
+| Dry run | Testing / debugging (no writes) | `--dry-run --summary` |
+
+**Checklist:**
+- [ ] 1. Record workspace: `export SKILL_WORKSPACE="$(pwd)"`
+- [ ] 2. Test SSH: `ssh -p 29418 <username>@<host> gerrit version`
+- [ ] 3. Test with dry run (no file writes, verify events arrive):
+  ```bash
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" \
+    --workspace "$SKILL_WORKSPACE" --dry-run --summary --max-events 5
+  ```
+- [ ] 4. Start the background listener:
+  ```bash
+  # Write to file + auto-reconnect
+  python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" \
+    --workspace "$SKILL_WORKSPACE" \
+    --output "$SKILL_WORKSPACE/events.jsonl" \
+    --reconnect --quiet &
+  echo "Listener PID: $!"
+  ```
+- [ ] 5. Filter by event type / project / branch (add as needed):
+  ```bash
+  --filter patchset-created,change-merged   # only these event types
+  --project myOrg/myRepo                    # only this project
+  --branch main                             # only this branch
+  ```
+- [ ] 6. Read events (from file):
+  ```bash
+  # Python — reliable cross-platform reader (no jq dependency)
+  python3 - <<'EOF'
+  import json
+  with open("events.jsonl") as f:
+      for line in f:
+          line = line.rstrip("\n")
+          if not line:
+              continue
+          ev = json.loads(line)
+          print(ev["type"], ev.get("change", {}).get("number", ""))
+  EOF
+  ```
+- [ ] 7. Stop the listener when done: `kill <PID>`
+
+---
+
+## Configuration Reference
+
+### Config File Search Order (Highest Priority First)
+
+| Priority | Path | Notes |
+|---|---|---|
+| 1 ✅ preferred | `{workspace}/config/gerrit-api/gerrit_config.json` | Create here |
+| 2 | `{workspace}/config/gerrit_config.json` | |
+| 3 | `{workspace}/gerrit_config.json` | |
+| 4 | `{skill-dir}/gerrit_config.json` | Dev/testing fallback |
+| 5 | `$HOME/.config/gerrit-api/gerrit_config.json` | Per-user |
+| 6 | `$HOME/.config/gerrit_config.json` | |
+| 7 | `$HOME/gerrit_config.json` | |
+
+`{workspace}` = value of `SKILL_WORKSPACE` env var, or the directory where the script is invoked.
+
+### Environment Variables (fallback when no config file)
+
+| Variable | Config key | Default | Required |
+|---|---|---|---|
+| `GERRIT_URL` | `url` | — | ✅ Yes |
+| `GERRIT_USERNAME` | `username` | — | ✅ Yes |
+| `GERRIT_HTTP_PASSWORD` | `password` | — | ✅ Yes |
+| `GERRIT_SSH_HOST` | `ssh_host` | derived from `url` | No |
+| `GERRIT_SSH_PORT` | `ssh_port` | `29418` | No |
+| `GERRIT_SSH_USERNAME` | `ssh_username` | same as `username` | No |
+| `GERRIT_SSH_KEY` | `ssh_key` | `~/.ssh/` defaults | No |
+| `HOOK_URL` | `hook_url` | — | No |
+| `HOOK_TOKEN` | `hook_token` | — | No |
+| `OUTBOX_PATH` | `outbox_path` | `{workspace}/events.outbox.jsonl` | No |
+
+Set env vars:
+```bash
 export GERRIT_URL="https://gerrit.example.com"
 export GERRIT_USERNAME="john.doe"
-export GERRIT_HTTP_PASSWORD="your-http-credential-token"
-export GERRIT_SSH_HOST="gerrit.example.com"   # optional; derived from GERRIT_URL
-export GERRIT_SSH_PORT="29418"                 # optional; default 29418
-export GERRIT_SSH_USERNAME="john.doe"          # optional; defaults to GERRIT_USERNAME
-export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # optional
-# Hook delivery (optional)
-export HOOK_URL="http://127.0.0.1:8443/events"
-export HOOK_TOKEN="your-hook-token"
-export OUTBOX_PATH="/var/log/gerrit/events.outbox.jsonl"
+export GERRIT_HTTP_PASSWORD="your-token"
 ```
 
-### Tools
+---
 
-- `python3` (≥ 3.9) — used for all scripts (`gerrit_api.py`, `gerrit_stream_events.py`)
-- `ssh` — used by the stream-events listener to connect to Gerrit
-
-## Quick Start
-
-Use the cross-platform helper script at `scripts/gerrit_api.py` for REST API operations.
-
-```bash
-# Query open changes
-python scripts/gerrit_api.py query "status:open+limit:5"
-
-# Get change details
-python scripts/gerrit_api.py get-change 12345
-
-# List files changed in a revision
-python scripts/gerrit_api.py list-files 12345
-
-# Get a file diff
-python scripts/gerrit_api.py get-diff 12345 "src/main/App.java"
-
-# Get raw file content
-python scripts/gerrit_api.py get-content 12345 "src/main/App.java"
-
-# Post a draft comment on a specific line
-python scripts/gerrit_api.py create-draft 12345 current '{"path":"src/main/App.java","line":23,"message":"Consider renaming this.","unresolved":true}'
-
-# Post a review with a Code-Review +1 label
-python scripts/gerrit_api.py review 12345 current '{"message":"Looks good!","labels":{"Code-Review":1}}'
-
-# Submit a change
-python scripts/gerrit_api.py submit 12345
-
-# Abandon a change
-python scripts/gerrit_api.py abandon 12345
-```
-
-## SSH Stream Events
-
-Gerrit exposes a real-time event feed over SSH via `gerrit stream-events`. Use `scripts/gerrit_stream_events.py` to subscribe to this feed, parse each event, and act on it continuously.
+## SSH Stream Events — Full Reference
 
 ### How it works
 
-1. The script opens an SSH connection to the Gerrit server on port 29418 (or `ssh_port`).
-2. It runs `gerrit stream-events` on the server.
-3. Gerrit emits one JSON object per line for every repository event.
-4. The script parses each line, enriches it with a `summary` string and `_received_at` timestamp, optionally filters by event type / project / branch, and writes to stdout (and optionally a log file).
+1. Script opens SSH to Gerrit port 29418 (configurable).
+2. Runs `gerrit stream-events` on the server.
+3. Gerrit emits one JSON line per event.
+4. Script enriches each event with `_received_at` (ISO timestamp) and `summary` (human-readable description).
+5. Events go to stdout, optionally to a JSONL file and/or HTTP hook.
 
-### Quick Start — Stream Events
+### Script Options Reference
 
-```bash
-# Make executable (one-time)
-chmod +x scripts/gerrit_stream_events.py
+```
+python3 scripts/gerrit_stream_events.py [options]
 
-# Stream all events (Ctrl+C to stop)
-python3 scripts/gerrit_stream_events.py
+Config:
+  --config FILE         Config file (searches 7 locations if omitted)
+  --workspace DIR       Project workspace dir (overrides SKILL_WORKSPACE / cwd)
 
-# Pretty-print only new patch-set uploads and merges
-python3 scripts/gerrit_stream_events.py \
-  --filter patchset-created,change-merged \
-  --pretty
+Filtering:
+  --filter TYPES        Comma-separated event types to include (default: all)
+  --project NAMES       Comma-separated project names to filter
+  --branch NAMES        Comma-separated branch names to filter
 
-# Show one-line human-readable summaries
-python3 scripts/gerrit_stream_events.py --summary
+File output:
+  --output PATH         Append events to PATH as compact JSONL
+  --no-output           Disable file output even if --output is set
+  --atomic-write        Atomic O_APPEND+fsync writes (default: on)
+  --no-atomic-write     Disable atomic file writes (compatibility mode)
 
-# Collect 20 events then exit (useful for testing)
-python3 scripts/gerrit_stream_events.py --max-events 20
+HTTP hook:
+  --hook-url URL        POST each event as JSON to this URL
+  --hook-token TOKEN    X-Auth-Token header value (never logged)
+  --hook-retries N      Max hook retries on 5xx/network error (default: 3)
+  --hook-timeout SECS   HTTP request timeout in seconds (default: 3)
+  --outbox PATH         Append undelivered events here
+                        (default: {workspace}/events.outbox.jsonl)
 
-# Run for 5 minutes, log to file, auto-reconnect on drop
-python3 scripts/gerrit_stream_events.py \
-  --timeout 300 \
-  --output gerrit_events.jsonl \
-  --reconnect
+Daemon / process:
+  --pid-file PATH       Write PID to PATH on startup; remove on clean exit
+  --dry-run             Parse and print events; skip all writes and hooks
 
-# Filter to a specific project and branch, pipe to jq
-python3 scripts/gerrit_stream_events.py \
-  --filter patchset-created \
-  --project myOrg/myProject \
-  --branch main \
-  | jq '{type, change: .change.number, subject: .change.subject, uploader: .uploader.name}'
+Stream control:
+  --max-events N        Stop after N events (0 = unlimited)
+  --timeout SECS        Stop after SECS seconds (0 = unlimited)
+  --reconnect           Reconnect on connection loss (exponential back-off)
+  --reconnect-delay N   Initial reconnect delay in seconds (default: 5)
+
+Display:
+  --pretty              Pretty-print JSON output to stdout
+  --summary             Emit one-line human-readable summaries instead of JSON
+  --verbose             Enable DEBUG-level logging
+  --quiet               Suppress all log output
 ```
 
-### Agent Patterns
+### HTTP Hook
 
-See the **Script Options Reference → Updated Agent Patterns** section below for full examples (Patterns A–D).
+When `--hook-url` is set, each accepted event is POSTed as JSON to that URL.
 
-For a quick pipe-based approach:
+**Request format:**
+```
+POST /your-path HTTP/1.1
+Content-Type: application/json
+X-Auth-Token: <token>   ← only when --hook-token is set
 
-```bash
-python3 scripts/gerrit_stream_events.py \
-  --filter patchset-created \
-  | while IFS= read -r event; do
-      CHANGE=$(echo "$event" | python3 -c "import sys,json; e=json.load(sys.stdin); print(e['change']['number'])")
-      echo "New patch set on change $CHANGE"
-    done
+{ "type": "patchset-created", "change": {...}, "_received_at": "...", "summary": "..." }
+```
+
+**Response handling:**
+
+| HTTP status | Behaviour |
+|---|---|
+| 2xx | Delivered ✅ |
+| 4xx | Client error — not retried |
+| 5xx / timeout | Retry up to `--hook-retries` times (exp. backoff 0.5 s × 2ⁿ ± 10 % jitter), then write to outbox |
+
+> ⚠️ **Security:** Only point `--hook-url` at `127.0.0.1` or a UNIX socket. For external hosts, use TLS.
+
+### Foreground / systemd
+
+The script does not daemonize itself. Example systemd unit:
+
+```ini
+[Unit]
+Description=Gerrit stream-events listener
+After=network.target
+
+[Service]
+Environment=SKILL_WORKSPACE=/opt/gerrit
+ExecStart=/usr/bin/python3 /opt/gerrit/scripts/gerrit_stream_events.py \
+    --workspace /opt/gerrit \
+    --output /var/log/gerrit/events.jsonl \
+    --hook-url http://127.0.0.1:8443/events \
+    --hook-token *** \
+    --reconnect
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ### Event Type Reference
@@ -227,595 +417,108 @@ python3 scripts/gerrit_stream_events.py \
 
 ### Parsed Event Structure
 
-Every event emitted by the script has these additional fields added:
+Every event has these extra fields added by the script:
 
 | Field | Description |
 |---|---|
-| `_received_at` | ISO 8601 UTC timestamp when the agent received the event |
-| `summary` | Human-readable one-line description of the event |
+| `_received_at` | ISO 8601 UTC timestamp when the event was received |
+| `summary` | Human-readable one-line description |
 
-**Example parsed event** (`patchset-created`):
+---
 
-```json
-{
-  "type": "patchset-created",
-  "change": {
-    "project": "myOrg/myProject",
-    "branch": "main",
-    "id": "Iabc123...",
-    "number": 12345,
-    "subject": "Fix null pointer in UserService",
-    "owner": { "name": "Alice", "email": "alice@example.com" },
-    "url": "https://gerrit.example.com/c/myOrg/myProject/+/12345",
-    "commitMessage": "Fix null pointer in UserService\n\nChange-Id: Iabc123...\n",
-    "status": "NEW"
-  },
-  "patchSet": {
-    "number": 2,
-    "revision": "deadbeef...",
-    "parents": ["cafebabe..."],
-    "ref": "refs/changes/45/12345/2",
-    "uploader": { "name": "Alice" },
-    "author": { "name": "Alice" },
-    "sizeInsertions": 10,
-    "sizeDeletions": -3
-  },
-  "uploader": { "name": "Alice", "email": "alice@example.com", "username": "alice" },
-  "eventCreatedOn": 1715000000,
-  "_received_at": "2025-05-06T12:00:00Z",
-  "summary": "2025-05-06T12:00:00Z patchset-created: Alice uploaded ps2 to [myOrg/myProject/main #12345] 'Fix null pointer in UserService'"
-}
-```
+## Troubleshooting Checklist
 
-### Script Options Reference
+| Symptom | Check | Fix |
+|---|---|---|
+| `HTTP 401 Unauthorized` | HTTP password correct? | Re-generate at Gerrit → Settings → HTTP Credentials |
+| `HTTP 404 Not Found` | Change number exists? URL has trailing slash? | Verify change number; remove trailing slash from `url` |
+| `HTTP 409 Conflict` | Trying to review a change-edit? Missing approvals for submit? | Check change status in Gerrit UI |
+| Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" help` to see search paths |
+| Wrong workspace used | Did you `cd` before calling scripts? | Set `SKILL_WORKSPACE` before any `cd` commands |
+| SSH auth fails | SSH key uploaded to Gerrit? Right user/port? | Run `ssh -p 29418 <user>@<host> gerrit version` to test |
+| SSH "access denied" | Account lacks Stream Events capability | Ask Gerrit admin to grant under Global Capabilities |
+| Script path error | Using relative path after a `cd`? | Always use `python3 "$SKILL_WORKSPACE/scripts/..."` |
 
-```
-python3 scripts/gerrit_stream_events.py [options]
+---
 
-Config:
-  --config FILE         Config file (searches 7 default locations if omitted)
-
-Filtering:
-  --filter TYPES        Comma-separated event types to include (default: all)
-  --project NAMES       Comma-separated project names to filter
-  --branch NAMES        Comma-separated branch names to filter
-
-File output:
-  --output PATH         Append events to PATH as compact JSONL
-  --no-output           Disable file output even if --output is set
-  --atomic-write        Atomic O_APPEND+fsync writes (default: on)
-  --no-atomic-write     Disable atomic file writes (compatibility mode)
-
-HTTP hook:
-  --hook-url URL        POST each event as JSON to this URL
-  --hook-token TOKEN    X-Auth-Token header value (never logged)
-  --hook-retries N      Max hook retries on 5xx/network error (default: 3)
-  --hook-timeout SECS   HTTP request timeout in seconds (default: 3)
-  --outbox PATH         Append undelivered events here
-                        (default: <workspace>/events.outbox.jsonl)
-
-Daemon / process:
-  --pid-file PATH       Write PID to PATH on startup; remove on clean exit
-  --dry-run             Parse and print events; skip all writes and hooks
-
-Stream control:
-  --max-events N        Stop after N events (0 = unlimited)
-  --timeout SECS        Stop after SECS seconds (0 = unlimited)
-  --reconnect           Reconnect on connection loss (exponential back-off)
-  --reconnect-delay N   Initial reconnect delay in seconds (default: 5)
-
-Display:
-  --pretty              Pretty-print JSON output to stdout
-  --summary             Emit one-line human-readable summaries instead of JSON
-  --verbose             Enable DEBUG-level logging
-  --quiet               Suppress all log output
-```
-
-### HTTP Hook
-
-When `--hook-url` is set, each accepted event is **POSTed** as JSON (same payload written to the JSONL file) to that URL.
-
-#### Request format
-
-```
-POST /your-path HTTP/1.1
-Content-Type: application/json
-X-Auth-Token: <token>          ← only when --hook-token is set
-
-{ "type": "patchset-created", "change": {...}, "_received_at": "...", "summary": "..." }
-```
-
-#### Response handling
-
-| HTTP status | Behaviour |
-|---|---|
-| 2xx | Delivered — done |
-| 4xx | Client error — **not retried** (bad token, wrong path, etc.) |
-| 5xx / network error / timeout | **Retry** up to `--hook-retries` times with exponential back-off (base 0.5 s × 2ⁿ ± 10 % jitter), then write to outbox |
-
-#### Outbox
-
-Events that exhaust all retries are appended to the outbox file (JSONL, same atomic-append semantics) so they can be replayed later.  Default path: `<workspace>/events.outbox.jsonl`.
-
-> [!WARNING]
-> Only point `--hook-url` at `127.0.0.1` or a UNIX socket in production.  If you must reach an external host, use TLS and rotate the token regularly.
-
-### Foreground / systemd Mode
-
-The script never daemonises itself.  Run it under `nohup &`, `systemd`, `supervisord`, or any process manager.  A minimal systemd unit:
-
-```ini
-[Unit]
-Description=Gerrit stream-events listener
-After=network.target
-
-[Service]
-ExecStart=/usr/bin/python3 /opt/gerrit/scripts/gerrit_stream_events.py \
-    --output /var/log/gerrit/events.jsonl \
-    --hook-url http://127.0.0.1:8443/events \
-    --hook-token *** \
-    --reconnect
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Updated Agent Patterns
-
-#### Pattern A — Background listener + polling log file (updated)
-
-```bash
-# Start listener: write file + push to hook, reconnect automatically
-python3 scripts/gerrit_stream_events.py \
-  --output events.jsonl \
-  --hook-url http://127.0.0.1:8443/events \
-  --hook-token MY_TOKEN \
-  --reconnect --quiet &
-
-# Later: read new events (reads only complete lines ending with \n)
-while IFS= read -r line; do
-  TYPE=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin)['type'])")
-  echo "Event: $TYPE"
-done < events.jsonl
-```
-
-#### Pattern B — Bounded collection for batch processing
-
-```bash
-python3 scripts/gerrit_stream_events.py \
-  --timeout 30 \
-  --filter patchset-created,change-merged \
-  > batch_events.jsonl
-
-# Process results
-python3 -c "
-import json, sys
-for line in sys.stdin:
-    ev = json.loads(line)
-    if ev['type'] == 'patchset-created':
-        print(ev['change']['number'], ev['patchSet']['number'])
-" < batch_events.jsonl
-```
-
-#### Pattern C — Dry-run debug (no writes)
-
-```bash
-python3 scripts/gerrit_stream_events.py \
-  --dry-run --summary --max-events 10
-```
-
-#### Pattern D — Only hook, outbox as safety net
-
-```bash
-python3 scripts/gerrit_stream_events.py \
-  --no-output \
-  --hook-url http://127.0.0.1:8443/events \
-  --hook-token MY_TOKEN \
-  --outbox /var/log/gerrit/events.outbox.jsonl \
-  --reconnect
-```
-
-
+## Gerrit Concepts
 
 ### Changes and Patch Sets
-- A **change** is a single reviewable unit (corresponds to one commit).
-- Each update to a change creates a new **patch set** (a new commit with the same `Change-Id`).
-- Changes live under `refs/changes/` refs in the Git repo.
-
-### Change-Id
-- A footer line in the commit message (`Change-Id: I<hex>`) that links commits to Gerrit changes.
-- The `commit-msg` hook (installed from Gerrit) auto-generates this.
+- A **change** = one reviewable unit (one commit).
+- Each update creates a new **patch set** (amended commit with same `Change-Id`).
+- Changes live under `refs/changes/` in the git repo.
 
 ### Labels
-- **Code-Review**: Typically −2 to +2. `+2` means approved.
-- **Verified**: Typically −1 to +1. Usually set by CI.
-- Label ranges and names are project-specific.
-
-### Workflow
-1. Push to `refs/for/<branch>` to create/update a change for review.
-2. Reviewers add comments and vote via labels.
-3. Amend the commit (`git commit --amend`) and re-push for new patch sets.
-4. Once approvals are met, a committer submits the change.
-
-## REST API Reference
-
-### Authentication
-
-All authenticated requests use the `/a/` prefix and HTTP Basic Auth:
-
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/?q=status:open+limit:5"
-```
-
-### Output Format
-
-Gerrit JSON responses start with an **XSSI prevention prefix** `)]}'` on the first line. You must strip it before parsing:
-
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/?q=status:open" | tail -n +2 | jq .
-```
+- **Code-Review**: −2 to +2. `+2` = approved.
+- **Verified**: −1 to +1. Usually set by CI.
+- Ranges and names are project-specific.
 
 ### URL Encoding
-
-Project names, file paths, and branch names in URLs must be URL-encoded. Forward slashes in project/file paths become `%2F`:
-
+Project names and file paths in REST URLs must be URL-encoded:
 ```
 myOrg/myProject  →  myOrg%2FmyProject
 src/main/App.java  →  src%2Fmain%2FApp.java
 ```
+The `gerrit_api.py` script handles encoding automatically.
 
-### Key Endpoints
+---
 
-#### 1. Query Changes
+## REST API Reference (Direct HTTP — Advanced)
 
-```
-GET /a/changes/?q=<query>&n=<limit>&o=<option>
-```
+Use `gerrit_api.py` for most tasks. Only use direct HTTP if you need operations not covered by the script.
 
-Common query operators:
-- `status:open` / `status:merged` / `status:abandoned`
-- `owner:self` / `reviewer:self`
-- `project:<name>` / `branch:<name>`
-- `is:watched` / `is:starred`
-- `after:"2025-01-01"` / `before:"2025-12-31"`
-
-Common `o` (option) parameters to include extra data:
-- `CURRENT_REVISION` — include current revision info
-- `DETAILED_LABELS` — include detailed label/vote info
-- `DETAILED_ACCOUNTS` — include full account info
-- `CURRENT_FILES` — include file list for current revision
-- `MESSAGES` — include change messages
-
-Example:
+### Authentication
+All authenticated endpoints use the `/a/` prefix + HTTP Basic Auth:
 ```bash
 curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/?q=status:open+owner:self&n=10&o=CURRENT_REVISION&o=DETAILED_LABELS" \
-  | tail -n +2 | jq .
+  "$GERRIT_URL/a/changes/?q=status:open+limit:5" | python3 -c "import sys; print(sys.stdin.read()[5:])"
 ```
 
-#### 2. Get Change Details
-
-```
-GET /a/changes/<change-id>?o=CURRENT_REVISION&o=DETAILED_LABELS
-```
-
-The `<change-id>` can be:
-- A numeric change number: `12345`
-- The full triplet: `project~branch~Change-Id`
-- Just the Change-Id: `I8473b95934b5732ac55d26311a706c9c2bde9940`
-
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/12345?o=CURRENT_REVISION&o=DETAILED_LABELS&o=DETAILED_ACCOUNTS" \
-  | tail -n +2 | jq .
+### XSSI Prefix
+All Gerrit REST responses start with `)]}'` (4 chars + newline). Strip it before parsing:
+```python
+body = response_text[5:]  # strip ")]}'\n"
+data = json.loads(body)
 ```
 
-#### 3. List Files in a Revision
+### Key Endpoints Quick Reference
 
-```
-GET /a/changes/<change-id>/revisions/<revision-id>/files/
-```
+| Operation | Method | Endpoint |
+|---|---|---|
+| Query changes | GET | `/a/changes/?q=<query>&n=<limit>&o=<option>` |
+| Get change | GET | `/a/changes/<id>?o=CURRENT_REVISION&o=DETAILED_LABELS` |
+| List files | GET | `/a/changes/<id>/revisions/current/files/` |
+| Get diff | GET | `/a/changes/<id>/revisions/current/files/<file>/diff` |
+| Get content | GET | `/a/changes/<id>/revisions/current/files/<file>/content` |
+| Post review | POST | `/a/changes/<id>/revisions/current/review` |
+| Post draft | PUT | `/a/changes/<id>/revisions/current/drafts` |
+| Submit | POST | `/a/changes/<id>/submit` |
+| Abandon | POST | `/a/changes/<id>/abandon` |
+| Restore | POST | `/a/changes/<id>/restore` |
+| Add reviewer | POST | `/a/changes/<id>/reviewers` |
+| Set topic | PUT | `/a/changes/<id>/topic` |
 
-Use `current` as `<revision-id>` for the latest patch set.
+Common query options (`o=` parameter): `CURRENT_REVISION`, `DETAILED_LABELS`, `DETAILED_ACCOUNTS`, `CURRENT_FILES`, `MESSAGES`
 
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/12345/revisions/current/files/" \
-  | tail -n +2 | jq .
-```
+Common query operators: `status:open`, `status:merged`, `owner:self`, `reviewer:self`, `project:<name>`, `branch:<name>`, `after:"2025-01-01"`
 
-Response is a map of file paths to `FileInfo` objects:
-```json
-{
-  "/COMMIT_MSG": { "status": "A", "lines_inserted": 7, "size_delta": 551, "size": 551 },
-  "src/main/App.java": { "lines_inserted": 5, "lines_deleted": 3, "size_delta": 98, "size": 23348 }
-}
-```
+---
 
-#### 4. Get File Diff
+## Security
 
-```
-GET /a/changes/<change-id>/revisions/<revision-id>/files/<file-id>/diff
-```
-
-The `<file-id>` must be URL-encoded. Add `?intraline` for intraline differences.
-
-Example:
-```bash
-FILE_PATH="src%2Fmain%2FApp.java"
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/12345/revisions/current/files/$FILE_PATH/diff" \
-  | tail -n +2 | jq .
-```
-
-Response is a `DiffInfo` entity with `content` array containing `ab` (common), `a` (deleted), and `b` (added) line arrays.
-
-#### 5. Get File Content
-
-```
-GET /a/changes/<change-id>/revisions/<revision-id>/files/<file-id>/content
-```
-
-Returns **base64-encoded** file content.
-
-Example:
-```bash
-FILE_PATH="src%2Fmain%2FApp.java"
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  "$GERRIT_URL/a/changes/12345/revisions/current/files/$FILE_PATH/content" \
-  | base64 -d
-```
-
-#### 6. Post a Review (Set Labels, Comments)
-
-```
-POST /a/changes/<change-id>/revisions/<revision-id>/review
-Content-Type: application/json
-```
-
-**ReviewInput** JSON body:
-
-```json
-{
-  "message": "Overall review comment shown at the top",
-  "labels": {
-    "Code-Review": 1
-  },
-  "comments": {
-    "src/main/App.java": [
-      {
-        "line": 23,
-        "message": "Consider renaming this variable for clarity."
-      },
-      {
-        "range": {
-          "start_line": 50,
-          "start_character": 0,
-          "end_line": 55,
-          "end_character": 20
-        },
-        "message": "This block should be refactored."
-      }
-    ]
-  }
-}
-```
-
-Label values (project-specific, typical):
-- **Code-Review**: `-2` (reject), `-1` (looks wrong), `0` (no score), `+1` (looks good), `+2` (approved)
-- **Verified**: `-1` (fails), `0` (no score), `+1` (verified)
-
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Looks good to me!","labels":{"Code-Review":1}}' \
-  "$GERRIT_URL/a/changes/12345/revisions/current/review" \
-  | tail -n +2 | jq .
-```
-
-#### 7. Post a Draft Comment
-
-```
-PUT /a/changes/<change-id>/revisions/<revision-id>/drafts
-Content-Type: application/json
-```
-
-**CommentInput** JSON body:
-
-```json
-{
-  "path": "src/main/App.java",
-  "line": 23,
-  "message": "[nit] trailing whitespace",
-  "unresolved": true
-}
-```
-
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X PUT \
-  -H "Content-Type: application/json" \
-  -d '{"path":"src/main/App.java","line":23,"message":"[nit] trailing whitespace","unresolved":true}' \
-  "$GERRIT_URL/a/changes/12345/revisions/current/drafts" \
-  | tail -n +2 | jq .
-```
-
-#### 8. Submit a Change
-
-```
-POST /a/changes/<change-id>/submit
-```
-
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -d '{}' \
-  "$GERRIT_URL/a/changes/12345/submit" \
-  | tail -n +2 | jq .
-```
-
-#### 9. Abandon / Restore a Change
-
-```
-POST /a/changes/<change-id>/abandon
-POST /a/changes/<change-id>/restore
-```
-
-Both accept an optional JSON body with a `message` field:
-
-```bash
-# Abandon
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Superseded by change 12346"}' \
-  "$GERRIT_URL/a/changes/12345/abandon" \
-  | tail -n +2 | jq .
-
-# Restore
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Re-opening for further review"}' \
-  "$GERRIT_URL/a/changes/12345/restore" \
-  | tail -n +2 | jq .
-```
-
-#### 10. Add Reviewer
-
-```
-POST /a/changes/<change-id>/reviewers
-Content-Type: application/json
-```
-
-```json
-{
-  "reviewer": "jane.roe@example.com"
-}
-```
-
-To add as CC instead of reviewer, add `"state": "CC"`.
-
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"reviewer":"jane.roe@example.com"}' \
-  "$GERRIT_URL/a/changes/12345/reviewers" \
-  | tail -n +2 | jq .
-```
-
-#### 11. Set Topic
-
-```
-PUT /a/changes/<change-id>/topic
-Content-Type: application/json
-```
-
-Example:
-```bash
-curl -s --user "$GERRIT_USERNAME:$GERRIT_HTTP_PASSWORD" \
-  -X PUT \
-  -H "Content-Type: application/json" \
-  -d '{"topic":"my-feature-branch"}' \
-  "$GERRIT_URL/a/changes/12345/topic" \
-  | tail -n +2 | jq .
-```
-
-## Code Review Workflow
-
-### Step 1 — Find changes to review
-
-```bash
-python scripts/gerrit_api.py query "status:open+reviewer:self+-owner:self"
-```
-
-### Step 2 — Inspect a change
-
-```bash
-python scripts/gerrit_api.py get-change 12345
-python scripts/gerrit_api.py list-files 12345
-python scripts/gerrit_api.py get-diff 12345 "path/to/file.java"
-```
-
-### Step 3 — Post your review
-
-**Option A: Incremental Drafts**
-
-```bash
-python scripts/gerrit_api.py create-draft 12345 current '{"path":"path/to/file.java","line":42,"message":"Consider using a constant here instead of a magic number.","unresolved":true}'
-
-python scripts/gerrit_api.py review 12345 current '{
-  "message": "I left a few comments on the implementation. Please take a look.",
-  "labels": {"Code-Review": -1},
-  "drafts": "PUBLISH"
-}'
-```
-
-**Option B: Single Step Review**
-
-```bash
-python scripts/gerrit_api.py review 12345 current '{
-  "message": "Overall the approach looks solid. A few suggestions below.",
-  "labels": {"Code-Review": 1},
-  "comments": {
-    "path/to/file.java": [
-      {"line": 42, "message": "Consider using a constant here instead of a magic number.", "unresolved": true},
-      {"line": 65, "message": "Nice cleanup here.", "unresolved": false}
-    ]
-  }
-}'
-```
-
-Additional `comments` fields:
-- `notify` — notification level (`ALL`, `OWNER`, `NONE`; prefer `OWNER` to avoid spamming)
-- `in_reply_to` — URL-encoded UUID of the comment being replied to
-- `unresolved` — `true` for action-required comments, `false` for informational/optional nits
-- `fix_suggestions` — list of suggested code fixes
-
-### Step 4 — Submit when ready
-
-```bash
-python scripts/gerrit_api.py submit 12345
-```
-
-## Troubleshooting
-
-| Problem | Solution |
-|---|---|
-| `HTTP 401 Unauthorized` | Check `GERRIT_USERNAME` and `GERRIT_HTTP_PASSWORD` (or config file). Re-generate the HTTP password in Gerrit Settings. |
-| `HTTP 404 Not Found` | Verify the change number exists. Check `GERRIT_URL` has no trailing slash. |
-| `HTTP 409 Conflict` | You may be trying to review a change edit, or submit a change that doesn't meet requirements. |
-| Config file not loaded | The script searches 7 paths in priority order. Run `python scripts/gerrit_api.py help` to see the search order, and ensure the file is in one of those locations. |
-
-## Awareness
-
-- `GERRIT_URL` and `GERRIT_USERNAME` (or config file equivalents) can be used in output, but **never print** `GERRIT_HTTP_PASSWORD` or the `password` config field in logs or outputs.
-- The HTTP credential token must be kept secure and used only for authentication in API calls.
+- **Never print or log** `GERRIT_HTTP_PASSWORD`, `password` config field, or `hook_token`.
+- Use environment variables or the config file to pass credentials — never hardcode them.
+- Add `config/gerrit-api/gerrit_config.json` to `.gitignore`.
 
 ## Files
 
-- `scripts/gerrit_api.py` — REST API helper script (cross-platform, Python, no extra deps)
-- `scripts/gerrit_stream_events.py` — SSH stream-events listener and event parser
-- `scripts/gerrit_config.json.example` — config file template; copy to the recommended path
+- `scripts/gerrit_api.py` — REST API helper (cross-platform, Python stdlib only)
+- `scripts/gerrit_stream_events.py` — SSH stream-events listener with file/hook delivery
+- `scripts/gerrit_config.json.example` — config template
 
 ## References
 
-- [Gerrit REST API Documentation](https://gerrit-review.googlesource.com/Documentation/rest-api.html)
+- [Gerrit REST API](https://gerrit-review.googlesource.com/Documentation/rest-api.html)
 - [Gerrit Changes REST API](https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html)
 - [Gerrit Search Operators](https://gerrit-review.googlesource.com/Documentation/user-search.html)
 - [Gerrit Stream Events (SSH)](https://gerrit-review.googlesource.com/Documentation/cmd-stream-events.html)
-- [Gerrit SSH Commands](https://gerrit-review.googlesource.com/Documentation/cmd-index.html)
-- [Gerrit in 5 Minutes](https://github.com/yurnov/gerrit-in-5-min) — original skill this is based on

@@ -5,45 +5,57 @@ description: "Use this skill whenever the user wants to interact with Jira or Co
 
 # Atlassian Jira & Confluence Skill
 
-Interact with Jira and Confluence using the `atlassian-python-api` SDK. This skill covers all SDK-supported operations for both platforms.
+**What this skill does:** Create, read, update, and delete Jira issues/projects/sprints/boards and Confluence pages/spaces/attachments using the `atlassian-python-api` SDK.
 
-## Setup
+**Requires:** Python 3 + `pip install atlassian-python-api` (run once)
 
-### 1. Install the SDK (if not already installed)
+---
 
-Run this first — it's safe to run multiple times:
+## ⚠️ Step 0 — Record Workspace (Do This First, Every Session)
+
+> **Problem:** If you `cd` to a different directory during a task, config file search paths break.
+>
+> **Fix:** Capture the workspace at the very start, before any `cd` commands.
+
+```bash
+# Linux / macOS / Git Bash
+export SKILL_WORKSPACE="$(pwd)"
+
+# Windows CMD
+set SKILL_WORKSPACE=%CD%
+
+# Windows PowerShell
+$env:SKILL_WORKSPACE = (Get-Location).Path
+```
+
+The `load_config()` helper reads `SKILL_WORKSPACE` automatically. Set it once and forget it.
+
+---
+
+## ✅ Setup Checklist
+
+Complete these steps once before using the skill.
+
+### Step 1 — Install SDK
 
 ```bash
 pip install atlassian-python-api
+# or: python -m pip install atlassian-python-api
 ```
 
-On Windows (CMD or PowerShell), `pip` and `python` should both work. If `pip` isn't on PATH, try `python -m pip install atlassian-python-api`.
+It's safe to run multiple times.
 
-### 2. Configure Credentials
-
-Credentials can be provided via a **config file** (preferred) or **environment variables**. The config file always takes priority over environment variables when both are present.
-
-#### Option A: Config File (takes priority)
-
-The config file is searched in the following priority order (highest first):
-
-| Priority | Path |
-|---|---|
-| 1 (**preferred**) | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` |
-| 2 | `{workspace}/config/.atlassian.json` |
-| 3 | `{workspace}/.atlassian.json` |
-| 4 | `{skill-dir}/.atlassian.json` *(dev/testing fallback)* |
-| 5 | `$HOME/.config/atlassian-jira-confluence/.atlassian.json` |
-| 6 | `$HOME/.config/.atlassian.json` |
-| 7 | `$HOME/.atlassian.json` |
-
-`{workspace}` is the current working directory. **Always create the config at the highest-priority path** so agents find it without extra configuration.
+### Step 2 — Create Config File
 
 ```bash
-# Create config at the recommended location
-mkdir -p config/atlassian-jira-confluence
-# then fill in the file below
+# Linux / macOS
+mkdir -p "$SKILL_WORKSPACE/config/atlassian-jira-confluence"
+
+# Windows CMD
+mkdir "%SKILL_WORKSPACE%\config\atlassian-jira-confluence"
 ```
+
+Create `config/atlassian-jira-confluence/.atlassian.json`:
 
 ```json
 {
@@ -60,29 +72,119 @@ mkdir -p config/atlassian-jira-confluence
 }
 ```
 
-> `username` is only required for Atlassian Cloud (`.atlassian.net` URLs) — use your email address.
+> **Note:** `username` is only required for Atlassian Cloud (`.atlassian.net` URLs).
+>
+> **Tokens:** Generate at Jira/Confluence → Profile → Personal Access Tokens (Data Center), or Atlassian account settings → API tokens (Cloud).
 
-#### Option B: Environment Variables
-
-Never ask the user to paste tokens into code. Read them only via `os.environ`.
-
-```bash
-# Confluence
-export CONFLUENCE_URL=https://your-confluence.example.com
-export CONFLUENCE_PAT_TOKEN=your-pat-token
-export CONFLUENCE_USERNAME=you@example.com   # Cloud only
-
-# Jira
-export JIRA_URL=https://your-jira.example.com
-export JIRA_PAT_TOKEN=your-pat-token
-export JIRA_USERNAME=you@example.com          # Cloud only
+Add to `.gitignore`:
+```
+config/atlassian-jira-confluence/.atlassian.json
 ```
 
-Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
+### Step 3 — Test the Connection
 
-### 3. Initialize Clients
+```python
+# Save as test_connection.py and run: python test_connection.py
+import sys, os
+sys.path.insert(0, os.environ.get("SKILL_WORKSPACE", "."))
+from atlassian import Jira
 
-Always use the `load_config()` + helper functions below so that the config-file-first priority is respected automatically.
+# (paste get_jira() helper below here, or copy from the Initialize Clients section)
+jira = get_jira()
+print(jira.myself())
+```
+
+---
+
+## ⚡ Quick Reference
+
+| Task | SDK call |
+|---|---|
+| Create issue | `jira.issue_create(fields={...})` |
+| Get issue | `jira.issue("PROJ-123")` |
+| Update issue | `jira.update_issue_field("PROJ-123", fields={...})` |
+| Transition issue | `jira.transition_issue("PROJ-123", "Done")` |
+| JQL search | `jira.jql("project=PROJ AND status='Open'", limit=50)` |
+| Add comment | `jira.add_comment("PROJ-123", "Comment text")` |
+| Create Confluence page | `confluence.create_page("SPACE", "Title", "<p>Body</p>")` |
+| Get page by title | `confluence.get_page_by_title("SPACE", "Title")` |
+| Update page | `confluence.update_page(page_id, "Title", "<p>New body</p>")` |
+| Search Confluence (CQL) | `confluence.cql('space="SPACE" AND text~"keyword"', limit=20)` |
+
+---
+
+## 📋 Task Workflows
+
+### Workflow A — Triage / Update a Jira Issue (Step-by-Step Checklist)
+
+- [ ] 1. Set workspace: `export SKILL_WORKSPACE="$(pwd)"`
+- [ ] 2. Install SDK if needed: `pip install atlassian-python-api`
+- [ ] 3. Copy the **Initialize Clients** code block below into your script
+- [ ] 4. Search for issues:
+  ```python
+  issues = jira.jql("project = PROJ AND status = 'To Do' ORDER BY priority DESC", limit=20)
+  for issue in issues.get("issues", []):
+      print(issue["key"], issue["fields"]["summary"])
+  ```
+- [ ] 5. Get full details of a specific issue:
+  ```python
+  issue = jira.issue("PROJ-123")
+  print(issue["fields"]["status"]["name"])
+  ```
+- [ ] 6. Update a field:
+  ```python
+  jira.update_issue_field("PROJ-123", fields={"priority": {"name": "High"}})
+  ```
+- [ ] 7. Transition to new status:
+  ```python
+  jira.transition_issue("PROJ-123", "In Progress")
+  ```
+- [ ] 8. Add a comment:
+  ```python
+  jira.add_comment("PROJ-123", "Investigating root cause.")
+  ```
+
+---
+
+### Workflow B — Create / Update a Confluence Page (Step-by-Step Checklist)
+
+- [ ] 1. Set workspace: `export SKILL_WORKSPACE="$(pwd)"`
+- [ ] 2. Copy the **Initialize Clients** code block below into your script
+- [ ] 3. Find the target space key (list all spaces):
+  ```python
+  spaces = confluence.get_all_spaces(start=0, limit=50)
+  for s in spaces.get("results", []):
+      print(s["key"], s["name"])
+  ```
+- [ ] 4. Check if the page already exists:
+  ```python
+  page = confluence.get_page_by_title("MYSPACE", "My Page Title")
+  ```
+- [ ] 5a. If page does NOT exist — create it:
+  ```python
+  result = confluence.create_page(
+      space="MYSPACE",
+      title="My Page Title",
+      body="<p>Content in storage format.</p>",
+      parent_id=None,   # or a parent page ID
+  )
+  print(result["id"], result["_links"]["webui"])
+  ```
+- [ ] 5b. If page EXISTS — update it:
+  ```python
+  page_id = page["id"]
+  confluence.update_page(page_id, "My Page Title", "<p>Updated content.</p>")
+  ```
+- [ ] 6. (Optional) Add a label:
+  ```python
+  confluence.set_page_label(page_id, "my-label")
+  ```
+
+---
+
+## Initialize Clients (Copy-Paste This Into Your Script)
+
+Always use this code block so config-file priority is respected automatically.
 
 ```python
 import os
@@ -93,6 +195,18 @@ from atlassian import Jira, Confluence
 
 _SKILL_NAME = "atlassian-jira-confluence"
 _CONFIG_FILENAME = ".atlassian.json"
+
+
+def _workspace() -> Path:
+    """Return the project workspace directory.
+
+    Reads SKILL_WORKSPACE env var first so the workspace stays correct even
+    when the calling process has changed its working directory mid-session
+    (e.g. OpenClaw / Copilot agents that cd into subdirectories).
+    Falls back to cwd() for backward compatibility.
+    """
+    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
+    return Path(ws).resolve() if ws else Path(os.getcwd())
 
 
 def load_config() -> dict:
@@ -106,8 +220,10 @@ def load_config() -> dict:
       5. $HOME/.config/atlassian-jira-confluence/.atlassian.json
       6. $HOME/.config/.atlassian.json
       7. $HOME/.atlassian.json
+
+    {workspace} = SKILL_WORKSPACE env var, or cwd when the script was started.
     """
-    workspace = Path(os.getcwd())
+    workspace = _workspace()
     skill_dir = Path(__file__).resolve().parent  # adjust if script location differs
     home = Path.home()
 
@@ -128,7 +244,7 @@ def load_config() -> dict:
 
 
 def _preferred_config_path() -> str:
-    return str(Path(os.getcwd()) / "config" / _SKILL_NAME / _CONFIG_FILENAME)
+    return str(_workspace() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
 
 
 def is_cloud(url: str) -> bool:
@@ -169,75 +285,97 @@ def get_confluence():
 
 ---
 
-## Windows Compatibility
+## Configuration Reference
 
-When running scripts on Windows:
-- Use `python` (not `python3`) unless the user specifies otherwise
-- Path separators: use `os.path.join()` or raw strings `r"C:\path"` — never hardcode forward slashes in file paths
-- In CMD: set env vars with `set JIRA_URL=https://...`
-- In PowerShell: `$env:JIRA_URL = "https://..."`
-- In Python scripts, `os.environ.get()` works identically on all platforms
+### Config File Search Order (Highest Priority First)
 
----
+| Priority | Path | Notes |
+|---|---|---|
+| 1 ✅ preferred | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` | Create here |
+| 2 | `{workspace}/config/.atlassian.json` | |
+| 3 | `{workspace}/.atlassian.json` | |
+| 4 | `{skill-dir}/.atlassian.json` | Dev/testing fallback |
+| 5 | `$HOME/.config/atlassian-jira-confluence/.atlassian.json` | Per-user |
+| 6 | `$HOME/.config/.atlassian.json` | |
+| 7 | `$HOME/.atlassian.json` | |
 
-## Jira Operations
+`{workspace}` = value of `SKILL_WORKSPACE` env var, or `cwd()` at script start.
 
-See `references/jira-operations.md` for the full reference. Key categories:
+### Environment Variables (fallback when no config file)
 
-- **Issues**: create, read, update, delete, transition, link, clone, archive
-- **Search**: JQL queries, CQL autocomplete, CSV export
-- **Comments & Worklogs**: add/edit/delete comments, log time
-- **Attachments**: upload files, download all attachments
-- **Projects**: CRUD, components, versions, issue types, permissions
-- **Boards & Sprints**: Agile boards, sprint management, backlog
-- **Users & Groups**: lookup, create groups, manage membership
-- **Epics**: epic issues, move to backlog
-- **Admin**: reindex, permissions, application properties, custom fields
-- **Cluster/Health** (DC only): cluster nodes, health checks
-- **Tempo**: worklog search
+```bash
+# Confluence
+export CONFLUENCE_URL=https://your-confluence.example.com
+export CONFLUENCE_PAT_TOKEN=your-pat-token
+export CONFLUENCE_USERNAME=you@example.com   # Cloud only
 
-## Confluence Operations
-
-See `references/confluence-operations.md` for the full reference. Key categories:
-
-- **Pages**: create, read, update, delete, move, append, export as PDF
-- **Spaces**: list, get, archive, permissions, export
-- **Attachments**: upload file/content, download, delete, version history
-- **Labels**: add/remove labels on pages
-- **Comments**: add inline and page-level comments
-- **Templates**: create, update, list, delete global/space templates
-- **Whiteboards** (Cloud only): create, get, delete
-- **Users & Groups**: lookup, password change, group membership
-- **Search (CQL)**: full-text and structured search
-- **Permissions**: space-level permissions for users, groups, anonymous
-- **Properties**: set/get/delete page properties and inline task checkboxes
-
----
-
-## Execution Pattern
-
-When a user asks for a Jira/Confluence operation:
-
-1. **Check credentials** — call `load_config()` first, fall back to env vars; fail fast with a helpful message if both are missing
-2. **Install SDK** if not present (`pip install atlassian-python-api`)
-3. **Write a Python script to a file** — **never use `python -c '...'` one-liners**. Python code often contains single quotes (dict keys, f-strings like `s['name']`) that break shell quoting when the one-liner is wrapped in single quotes. Always write to a `.py` file and run it.
-4. **Run it** using `python` (or `python3` on Linux/Mac)
-5. **Show results** — print structured output (JSON, table, or plain text as appropriate)
-6. **Handle errors gracefully** — wrap API calls in try/except and surface the HTTP status and message
-
-### Error Handling Template
-
-```python
-from atlassian.errors import ApiError
-
-try:
-    result = jira.issue("PROJ-123")
-    print(result)
-except ApiError as e:
-    print(f"API error {e.status_code}: {e.reason}")
-except Exception as e:
-    print(f"Error: {e}")
+# Jira
+export JIRA_URL=https://your-jira.example.com
+export JIRA_PAT_TOKEN=your-pat-token
+export JIRA_USERNAME=you@example.com          # Cloud only
 ```
+
+Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
+
+---
+
+## Execution Rules (Important for All Models)
+
+1. **Always write scripts to a `.py` file — never use `python -c '...'` one-liners.**
+   Python code often contains single quotes (dict keys, f-strings) that break shell quoting.
+
+2. **Always call `load_config()` at the start** — it automatically checks all 7 config paths.
+
+3. **Handle errors gracefully:**
+   ```python
+   from atlassian.errors import ApiError
+   try:
+       result = jira.issue("PROJ-123")
+   except ApiError as e:
+       print(f"API error {e.status_code}: {e.reason}")
+   except Exception as e:
+       print(f"Error: {e}")
+   ```
+
+4. **Windows compatibility:**
+   - Use `python` (not `python3`) unless specified
+   - Use `os.path.join()` for paths; never hardcode forward slashes
+   - `os.environ.get()` works identically on all platforms
+
+---
+
+## Jira Operations Reference
+
+Full reference: `references/jira-operations.md`
+
+| Category | Operations |
+|---|---|
+| Issues | create, read, update, delete, transition, link, clone, archive |
+| Search | JQL queries, CQL autocomplete, CSV export |
+| Comments & Worklogs | add/edit/delete comments, log time |
+| Attachments | upload files, download all |
+| Projects | CRUD, components, versions, issue types, permissions |
+| Boards & Sprints | Agile boards, sprint management, backlog |
+| Users & Groups | lookup, create groups, manage membership |
+| Epics | epic issues, move to backlog |
+| Admin | reindex, permissions, application properties, custom fields |
+
+## Confluence Operations Reference
+
+Full reference: `references/confluence-operations.md`
+
+| Category | Operations |
+|---|---|
+| Pages | create, read, update, delete, move, append, export as PDF |
+| Spaces | list, get, archive, permissions, export |
+| Attachments | upload file/content, download, delete, version history |
+| Labels | add/remove labels on pages |
+| Comments | add inline and page-level comments |
+| Templates | create, update, list, delete global/space templates |
+| Whiteboards | create, get, delete (Cloud only) |
+| Search (CQL) | full-text and structured search |
+| Permissions | space-level for users, groups, anonymous |
+| Properties | set/get/delete page properties and inline task checkboxes |
 
 ---
 

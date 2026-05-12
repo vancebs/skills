@@ -121,9 +121,26 @@ _SKILL_NAME = "gerrit-api"
 _CONFIG_FILENAME = "gerrit_config.json"
 
 
+# ─── Workspace resolution ─────────────────────────────────────────────────────
+
+def _workspace(explicit: str | None = None) -> Path:
+    """Return the project workspace directory.
+
+    Priority: --workspace arg > SKILL_WORKSPACE env var > cwd.
+
+    This ensures config-file lookup stays correct even when the calling
+    process changes its working directory mid-session (e.g. OpenClaw /
+    Copilot agents that cd into subdirectories).
+    """
+    if explicit:
+        return Path(explicit).resolve()
+    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
+    return Path(ws).resolve() if ws else Path.cwd()
+
+
 # ─── Config loading ───────────────────────────────────────────────────────────
 
-def _find_config_file(explicit_path: str | None) -> str | None:
+def _find_config_file(explicit_path: str | None, ws: Path | None = None) -> str | None:
     """Return the first config file found, searching in priority order.
 
     Priority:
@@ -136,13 +153,13 @@ def _find_config_file(explicit_path: str | None) -> str | None:
       7. $HOME/.config/{filename}
       8. $HOME/{filename}
 
-    {workspace} = cwd when the script is invoked
+    {workspace} = SKILL_WORKSPACE env var, or --workspace arg, or cwd
     {skill-dir} = gerrit-api/ directory (parent of this scripts/ folder)
     """
     if explicit_path:
         return explicit_path if Path(explicit_path).is_file() else None
 
-    workspace = Path.cwd()
+    workspace = ws or _workspace()
     skill_dir = Path(__file__).parent.parent  # gerrit-api/
     home = Path.home()
 
@@ -161,15 +178,15 @@ def _find_config_file(explicit_path: str | None) -> str | None:
     return None
 
 
-def _preferred_config_path() -> str:
+def _preferred_config_path(ws: Path | None = None) -> str:
     """Return the recommended path at which the user should create the config file."""
-    return str(Path.cwd() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
+    return str((ws or _workspace()) / "config" / _SKILL_NAME / _CONFIG_FILENAME)
 
-def load_config(config_path: str | None) -> dict:
+def load_config(config_path: str | None, ws: Path | None = None) -> dict:
     """Load credentials from config file (priority) then environment variables."""
     cfg: dict = {}
 
-    found = _find_config_file(config_path)
+    found = _find_config_file(config_path, ws)
     if found:
         try:
             with open(found) as f:
@@ -584,7 +601,10 @@ def emit_event(event: dict, pretty: bool, show_summary: bool) -> None:
 def stream_events(args: argparse.Namespace) -> int:
     """Main event streaming loop. Returns exit code."""
     _setup_logging(getattr(args, "verbose", False), args.quiet)
-    cfg = load_config(args.config)
+
+    # Resolve workspace early so all path lookups are stable
+    ws = _workspace(getattr(args, "workspace", None) or None)
+    cfg = load_config(args.config, ws)
 
     type_filter    = set(f.strip() for f in args.filter.split(",")  if f.strip()) if args.filter  else set()
     project_filter = set(p.strip() for p in args.project.split(",") if p.strip()) if args.project else set()
@@ -619,7 +639,7 @@ def stream_events(args: argparse.Namespace) -> int:
         args.outbox
         or cfg.get("outbox_path")
         or os.environ.get("OUTBOX_PATH", "")
-        or (str(Path.cwd() / "events.outbox.jsonl") if hook_url else None)
+        or (str(ws / "events.outbox.jsonl") if hook_url else None)
     ) or None
 
     if args.dry_run:
@@ -786,6 +806,9 @@ def main() -> None:
     # ── Config ────────────────────────────────────────────────────────────────
     parser.add_argument("--config", metavar="FILE", default=None,
                         help="Config file (searches 7 default locations if omitted)")
+    parser.add_argument("--workspace", metavar="DIR", default="",
+                        help="Project workspace directory for config file search "
+                             "(overrides SKILL_WORKSPACE env var and cwd)")
     # ── Filtering ─────────────────────────────────────────────────────────────
     parser.add_argument("--filter",  metavar="TYPES", default="",
                         help="Comma-separated event types to include (default: all)")

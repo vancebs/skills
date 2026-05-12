@@ -52,11 +52,26 @@ _SKILL_NAME = "gerrit-api"
 _CONFIG_FILENAME = "gerrit_config.json"
 
 
+# ─── Workspace resolution ─────────────────────────────────────────────────────
+
+def _workspace() -> Path:
+    """Return the project workspace directory.
+
+    Reads SKILL_WORKSPACE env var first so the workspace stays correct even
+    when the calling process has changed its working directory mid-session
+    (e.g. OpenClaw / Copilot agents that cd into subdirectories).
+
+    Falls back to cwd() for backward compatibility.
+    """
+    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
+    return Path(ws).resolve() if ws else Path.cwd()
+
+
 # ─── Config loading ───────────────────────────────────────────────────────────
 
 def _find_config_file() -> str | None:
     """Return the first config file found across the priority search paths."""
-    workspace = Path.cwd()
+    workspace = _workspace()
     skill_dir = Path(__file__).parent.parent  # gerrit-api/
     home = Path.home()
 
@@ -76,7 +91,7 @@ def _find_config_file() -> str | None:
 
 
 def _preferred_config_path() -> str:
-    return str(Path.cwd() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
+    return str(_workspace() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
 
 
 def load_config() -> tuple[str, str, str]:
