@@ -13,9 +13,9 @@ description: "Use this skill whenever the user wants to interact with Jira or Co
 
 ## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-### Step 0A — 记录 Workspace
+> 如果遇到路径相关问题，安装 `skill-guide` 获取详细指引：`npx skills add https://github.com/vancebs/skills --skill skill-guide`
 
-> **问题：** `SKILL_WORKSPACE` 用于查找配置文件，和 skill 安装目录是两个不同的概念。如果在会话中 `cd` 切换目录，必须提前固定 `SKILL_WORKSPACE`。
+### Step 0A — 记录 Workspace
 
 ```bash
 # Linux / macOS / Git Bash
@@ -351,12 +351,9 @@ Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
 
 ## Execution Rules (Important for All Models)
 
-1. **Always write scripts to a `.py` file — never use `python -c '...'` one-liners.**
-   Python code often contains single quotes (dict keys, f-strings) that break shell quoting.
+1. **Always call `load_config()` at the start** — it automatically checks all 7 config paths.
 
-2. **Always call `load_config()` at the start** — it automatically checks all 7 config paths.
-
-3. **Handle errors gracefully:**
+2. **Handle errors gracefully:**
    ```python
    from atlassian.errors import ApiError
    try:
@@ -366,11 +363,6 @@ Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
    except Exception as e:
        print(f"Error: {e}")
    ```
-
-4. **Windows compatibility:**
-   - Use `python` (not `python3`) unless specified
-   - Use `os.path.join()` for paths; never hardcode forward slashes
-   - `os.environ.get()` works identically on all platforms
 
 ---
 

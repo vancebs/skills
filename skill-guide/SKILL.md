@@ -25,11 +25,11 @@ keywords: [skill, guide, path, workspace, configuration, troubleshooting]
 
 在调用 skill 时，始终需要区分以下三个不同的目录。**混淆它们是能力较弱的模型最常见的错误来源。**
 
-| 变量 | 含义 | 典型路径 | 用于 |
-|---|---|---|---|
-| `SKILL_WORKSPACE` | Agent 的**项目工作目录** | `/home/user/myproject` | 配置文件、输出文件、日志 |
-| `SKILL_DIR` | **当前 skill 的安装目录** | `/home/user/myproject/.agents/skills/gerrit-api` | 该 skill 自带的脚本和文件 |
-| `$HOME` | 用户主目录 | `/home/user` | 全局配置、全局安装的 skill |
+| 变量                | 含义                 | 典型路径                                                                                       | 用于               |
+| ----------------- | ------------------ | ------------------------------------------------------------------------------------------ | ---------------- |
+| `SKILL_WORKSPACE` | Agent 的**项目工作目录**  | `/home/user/myproject`                                                                     | 配置文件、输出文件、日志     |
+| `SKILL_DIR`       | **当前 skill 的安装目录** | `/home/user/myproject/.agents/skills/gerrit-api`或者``/home/user/.agents/skills/gerrit-api`` | 该 skill 自带的脚本和文件 |
+| `$HOME`           | 用户主目录              | `/home/user`                                                                               | 全局配置、全局安装的 skill |
 
 > ❌ **错误做法：** 以 `pwd` 或相对路径调用 skill 脚本，或以 `pwd` 拼接配置文件路径。
 >

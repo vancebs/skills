@@ -29,9 +29,9 @@ compatibility: Requires python3 (≥3.9). No extra pip packages needed.
 
 ## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-### Step 0A — 记录 Workspace
+> 如果遇到路径相关问题，安装 `skill-guide` 获取详细指引：`npx skills add https://github.com/vancebs/skills --skill skill-guide`
 
-> `SKILL_WORKSPACE` 是 agent 的项目目录，用于查找配置文件和存放输出文件。
+### Step 0A — 记录 Workspace
 
 ```bash
 # Linux / macOS / Git Bash
@@ -45,8 +45,6 @@ $env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
 ### Step 0B — 确认本 Skill 安装目录（SKILL_DIR）
-
-> `SKILL_DIR` 是本 skill (`agent-code-review`) 的安装目录，**不同于** `SKILL_WORKSPACE`。
 
 ```bash
 # Linux / macOS — 自动检测并设置 SKILL_DIR

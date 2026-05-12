@@ -20,9 +20,9 @@ metadata:
 
 ## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-### Step 0A — 记录 Workspace
+> 如果遇到路径相关问题，安装 `skill-guide` 获取详细指引：`npx skills add https://github.com/vancebs/skills --skill skill-guide`
 
-> **问题：** `SKILL_WORKSPACE` 用于查找配置文件和输出文件，和 skill 安装目录是两个不同的概念。如果在会话中 `cd` 切换目录，`SKILL_WORKSPACE` 必须提前固定，否则配置文件无法找到。
+### Step 0A — 记录 Workspace
 
 ```bash
 # Linux / macOS / Git Bash
@@ -36,8 +36,6 @@ $env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
 ### Step 0B — 确认 Skill 安装目录（SKILL_DIR）
-
-> **问题：** `SKILL_WORKSPACE` 是 agent 的项目目录，**不是** skill 的安装目录。Skill 可能被安装在 workspace 的 `.agents/skills/` 子目录下，也可能是全局安装在用户主目录下。脚本必须从 skill 的实际安装路径调用。
 
 ```bash
 # Linux / macOS — 自动检测并设置 SKILL_DIR
@@ -64,17 +62,6 @@ $env:SKILL_DIR = @(
 if (-not $env:SKILL_DIR) {
     Write-Error "Skill '$skillName' not found. Install: npx skills add https://github.com/vancebs/skills --skill $skillName"
 }
-```
-
-> 如果 agent 平台会自动设置 `SKILL_DIR`，则无需手动检测。
-
-**调用脚本时始终使用 `$SKILL_DIR`（不要用 `$SKILL_WORKSPACE`）：**
-```bash
-# ✅ 正确 — 使用 skill 安装路径
-python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+limit:5"
-
-# ❌ 错误 — SKILL_WORKSPACE 是项目目录，不是 skill 安装目录
-python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+limit:5"
 ```
 
 ---
@@ -465,10 +452,8 @@ Every event has these extra fields added by the script:
 | `HTTP 404 Not Found` | Change number exists? URL has trailing slash? | Verify change number; remove trailing slash from `url` |
 | `HTTP 409 Conflict` | Trying to review a change-edit? Missing approvals for submit? | Check change status in Gerrit UI |
 | Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 "$SKILL_DIR/scripts/gerrit_api.py" help` to see search paths |
-| Wrong workspace used | Did you `cd` before calling scripts? | Set `SKILL_WORKSPACE` before any `cd` commands |
 | SSH auth fails | SSH key uploaded to Gerrit? Right user/port? | Run `ssh -p 29418 <user>@<host> gerrit version` to test |
 | SSH "access denied" | Account lacks Stream Events capability | Ask Gerrit admin to grant under Global Capabilities |
-| Script path error | Using relative path after a `cd`? | Always use `python3 "$SKILL_DIR/scripts/..."` |
 
 ---
 
