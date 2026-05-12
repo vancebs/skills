@@ -20,17 +20,18 @@ compatibility: Requires python3 (≥3.9). No extra pip packages needed.
 - `gerrit-api` — 访问 Gerrit REST API / SSH 事件流
 - `T2MCodingRule` — T2Mobile 编码规范知识库（审查标准来源）
 
-**脚本（stdlib only，无需 pip）：**
-- `scripts/poll_events.py` — 原子读取事件队列，拉取 patch diff，输出给 Agent 审查
+**本 skill 脚本（stdlib only，无需 pip）：**
+- `scripts/poll_events.py` — 原子读取事件队列，拉取 patch diff，输出 JSON 供 Agent 审查
 - `scripts/post_review.py` — 向 Gerrit 提交 review comment，可设置 Verified 标签
+- `scripts/ensure_stream_listener.py` — 健康检查 + 自动重启 Gerrit 事件监听进程
 
 ---
 
-## ⚠️ Step 0 — 记录 Workspace（每次会话第一步）
+## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-> **问题：** 如果在会话中 `cd` 切换目录，脚本将无法找到配置文件。
->
-> **解决方案：** 在执行任何命令前，先捕获 workspace 的绝对路径。
+### Step 0A — 记录 Workspace
+
+> `SKILL_WORKSPACE` 是 agent 的项目目录，用于查找配置文件和存放输出文件。
 
 ```bash
 # Linux / macOS / Git Bash
@@ -43,32 +44,97 @@ set SKILL_WORKSPACE=%CD%
 $env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
-之后所有脚本调用都使用绝对路径：
+### Step 0B — 确认本 Skill 安装目录（SKILL_DIR）
+
+> `SKILL_DIR` 是本 skill (`agent-code-review`) 的安装目录，**不同于** `SKILL_WORKSPACE`。
+
 ```bash
-python3 "$SKILL_WORKSPACE/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
+# Linux / macOS — 自动检测并设置 SKILL_DIR
+export SKILL_DIR=$(python3 -c "
+import os, sys
+from pathlib import Path
+name = 'agent-code-review'
+ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
+    if p.is_dir():
+        print(p); sys.exit(0)
+sys.exit(1)
+") || {
+    echo "ERROR: agent-code-review skill not found."
+    echo "Install: npx skills add https://github.com/vancebs/skills --skill agent-code-review"
+}
+
+# Windows PowerShell
+$skillName = 'agent-code-review'
+$env:SKILL_DIR = @(
+    "$env:SKILL_WORKSPACE\.agents\skills\$skillName",
+    "$HOME\.agents\skills\$skillName"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+```
+
+之后脚本调用始终使用：
+```bash
+python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
 ```
 
 ---
 
 ## ✅ 初始化配置清单（一次性，首次使用前完成）
 
-### Step 1 — 确认依赖 Skill 已安装并配置
+### Step 1 — 检查依赖 Skill
+
+#### gerrit-api
 
 ```bash
-# 检查 gerrit-api 是否可用（应输出 JSON 变更列表）
-python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+limit:1"
-
-# T2MCodingRule 无需额外配置，加载 skill 即可
+# 检测 gerrit-api 是否已安装
+python3 -c "
+import os
+from pathlib import Path
+ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+for p in [ws/'.agents'/'skills'/'gerrit-api', Path.home()/'.agents'/'skills'/'gerrit-api']:
+    if p.is_dir():
+        print('OK:', p); exit(0)
+print('NOT FOUND')
+"
 ```
 
-若 gerrit-api 未配置，请先按 gerrit-api/SKILL.md 完成配置。
+若未安装：
+```bash
+npx skills add https://github.com/vancebs/skills --skill gerrit-api
+```
+
+安装后，按 **gerrit-api/SKILL.md** 的 Setup Checklist 完成配置（设置 Gerrit 凭据、测试连接）。
+
+> **注意：** 使用 gerrit-api 的功能时，请按照 gerrit-api skill 的 SKILL.md 操作，不要直接引用 gerrit-api 脚本的绝对路径。gerrit-api 的 `SKILL_DIR` 应按照 gerrit-api/SKILL.md 的 Step 0B 独立检测。
+
+#### T2MCodingRule
+
+T2MCodingRule 无需额外配置，加载 skill 即可。
+
+```bash
+# 检测 T2MCodingRule 是否已安装
+python3 -c "
+import os
+from pathlib import Path
+ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+for p in [ws/'.agents'/'skills'/'T2MCodingRule', Path.home()/'.agents'/'skills'/'T2MCodingRule']:
+    if p.is_dir():
+        print('OK:', p); exit(0)
+print('NOT FOUND')
+"
+```
+
+若未安装：
+```bash
+npx skills add https://github.com/vancebs/skills --skill T2MCodingRule
+```
 
 ### Step 2 — 创建 agent-code-review 配置文件
 
 ```bash
 # Linux / macOS
 mkdir -p "$SKILL_WORKSPACE/config/agent-code-review"
-cp "$SKILL_WORKSPACE/scripts/agent_code_review_config.json.example" \
+cp "$SKILL_DIR/scripts/agent_code_review_config.json.example" \
    "$SKILL_WORKSPACE/config/agent-code-review/agent_code_review_config.json"
 ```
 
@@ -94,71 +160,89 @@ cp "$SKILL_WORKSPACE/scripts/agent_code_review_config.json.example" \
 | `review_branches` | `[]` | 只审查指定分支（空数组 = 全部） |
 | `skip_file_patterns` | `[]` | 跳过匹配此 glob 的文件（如 `["*.md", "*.xml"]`） |
 
-> **⚠️ 安全提醒：** 将配置文件加入 `.gitignore`：
+> ⚠️ 将配置文件加入 `.gitignore`：
 > ```
 > config/agent-code-review/agent_code_review_config.json
 > ```
 
-### Step 3 — 测试 Gerrit 连接与事件流
+### Step 3 — 测试 Gerrit 连接
 
-```bash
-# 用 dry-run 模式验证可以拉到事件（监听 5 条后自动退出）
-python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --filter patchset-created \
-  --dry-run --summary --max-events 5
-```
+使用 gerrit-api skill 验证连接（按照 gerrit-api/SKILL.md 的操作方法）。
 
-### Step 4 — 启动事件流监听（后台长期运行）
+### Step 4 — 配置 Cron Job（定时触发健康检查 + Code Review）
 
-```bash
-# 启动监听，将 patchset-created 事件持续写入队列文件
-python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --output "$SKILL_WORKSPACE/events.jsonl" \
-  --filter patchset-created \
-  --reconnect --quiet &
-
-echo "Stream listener PID: $!"
-```
-
-> **systemd 部署方式** 见本文末尾的附录。
-
-### Step 5 — 配置 Cron Job（定时触发 Code Review）
+Cron Job 是整个方案的入口。它每 1 分钟执行一次，完成两件事：
+1. **确保事件流监听进程在运行**（如已停止则自动重启）
+2. **读取队列并执行 Code Review**（如有事件）
 
 **首选：使用 OpenClaw 原生 Cron Job**
 
-在 OpenClaw 中创建 cron job，间隔 1 分钟，触发内容：
+在 OpenClaw 中创建 cron job，间隔 1 分钟，任务内容：
+
 ```
 执行 agent-code-review 工作流（见下方"工作流"章节）
 ```
 
-**备选：Python 后台轮询脚本**（平台不支持 cron 时使用）
+**备选：Python 后台轮询**（平台不支持 cron 时使用）
 
 ```bash
-# 启动后台轮询进程（每 60 秒执行一次）
 python3 - <<'EOF' &
 import time, subprocess, os, sys
 workspace = os.environ.get("SKILL_WORKSPACE", os.getcwd())
-script = f"{workspace}/scripts/poll_events.py"
+skill_dir = os.environ.get("SKILL_DIR", "")
 while True:
     time.sleep(60)
-    subprocess.run([sys.executable, script, "--workspace", workspace])
+    # 每次循环执行健康检查 + review（等同于 cron job）
+    subprocess.run([sys.executable,
+        skill_dir + "/scripts/ensure_stream_listener.py",
+        "--workspace", workspace])
+    subprocess.run([sys.executable,
+        skill_dir + "/scripts/poll_events.py",
+        "--workspace", workspace])
 EOF
-echo "Poller PID: $!"
+echo "Background poller PID: $!"
 ```
 
 ---
 
 ## 📋 工作流：Code Review（每次 Cron 触发时执行）
 
-> 这是 Agent 每次被 cron 触发后应执行的完整流程。
+> 以下是 Agent 每次被 cron 触发后应依次执行的完整步骤。
 
-### 阶段一 — 读取事件队列
+### 阶段一 — 健康检查：确保事件流监听进程在运行
 
 ```bash
-# 运行 poll_events.py，读取并清空队列，拉取 diff
-python3 "$SKILL_WORKSPACE/scripts/poll_events.py" \
+python3 "$SKILL_DIR/scripts/ensure_stream_listener.py" \
+  --workspace "$SKILL_WORKSPACE"
+```
+
+**执行逻辑：**
+1. 读取 PID 文件 `{workspace}/gerrit_stream_listener.pid`
+2. 如果 PID 对应进程仍在运行 → 输出"已运行"，直接返回（exit 0）
+3. 如果进程已停止或 PID 文件不存在：
+   - 自动查找 gerrit-api skill 安装目录（按 `GERRIT_API_SKILL_DIR` env var → workspace-local → 全局）
+   - 启动 `gerrit_stream_events.py`（参数：`--output {events_file} --filter patchset-created --reconnect --pid-file ...`）
+   - 返回 exit 0（已重启）或 exit 2（未找到 gerrit-api skill）
+
+**如果返回 exit 2**（gerrit-api 未安装）：
+- 停止本次执行
+- 按 Step 1 安装并配置 gerrit-api skill
+
+**（可选）手动指定 gerrit-api 目录：**
+```bash
+# 设置 GERRIT_API_SKILL_DIR 避免自动检测失败
+export GERRIT_API_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/gerrit-api"
+
+python3 "$SKILL_DIR/scripts/ensure_stream_listener.py" \
+  --workspace "$SKILL_WORKSPACE"
+```
+
+---
+
+### 阶段二 — 读取事件队列
+
+```bash
+python3 "$SKILL_DIR/scripts/poll_events.py" \
   --workspace "$SKILL_WORKSPACE" \
   > /tmp/review_payload.json
 ```
@@ -190,16 +274,16 @@ python3 "$SKILL_WORKSPACE/scripts/poll_events.py" \
 }
 ```
 
-- **如果 `events` 为空数组** → 本次无新提交，结束。
-- **如果 `error` 字段存在** → 检查 Gerrit 配置，见故障排查章节。
+- **如果 `events` 为空** → 本次无新提交，结束。
+- **如果某个 event 有 `error` 字段** → 检查 gerrit-api 配置；见故障排查章节。
 
 ---
 
-### 阶段二 — 逐事件 Code Review
+### 阶段三 — 逐事件 Code Review
 
-对 `events` 数组中的每一个事件，执行以下检查：
+对 `events` 中每一条记录，执行以下审查：
 
-#### 2A — 提交信息（Commit Message）检查清单
+#### 3A — 提交信息（Commit Message）检查清单
 
 - [ ] 格式符合 T2MCodingRule 一：`type(scope): subject`
 - [ ] `type` 为规范值之一（feat/fix/refactor/docs/test/chore/style/perf）
@@ -207,55 +291,51 @@ python3 "$SKILL_WORKSPACE/scripts/poll_events.py" \
 - [ ] Body 中包含 Jira ID（如 `Issue: PROJ-123`）
 - [ ] 如有 Breaking Change，有 `BREAKING CHANGE:` 行
 
-#### 2B — 每个文件的 Diff 审查
+#### 3B — 每个文件的 Diff 审查
 
-对 `files` 中每一个文件：
-
-**1. 判断语言**
+**判断语言并选择标准：**
 
 | 文件扩展名 | 适用规范 |
 |---|---|
 | `.java` | T2MCodingRule 四（Java 编码规范） |
 | `.c`, `.h` | T2MCodingRule 五（C 编码规范） |
 | `.cpp`, `.cc`, `.hpp` | T2MCodingRule 六（C++ 编码规范） |
-| 其他 | 通用代码质量标准（见 2C） |
+| 其他 | 通用代码质量标准（见 3C） |
 
-**2. 按规范审查（Java/C/C++ 核心检查项）**
+**Java/C/C++ 核心检查项：**
 
-- [ ] **命名规范**：类/变量/函数命名是否符合规范？
-- [ ] **注释规范**：公共 API / 复杂逻辑是否有必要注释？
+- [ ] **命名规范**：类/变量/函数命名符合 T2M 规范？
+- [ ] **注释规范**：公共 API / 复杂逻辑有必要注释？
 - [ ] **安全规范**（T2MCodingRule 七）：
   - [ ] 无硬编码密码、密钥、token
   - [ ] 日志中无敏感信息明文输出
-  - [ ] 权限检查是否正确（Android 相关）
+  - [ ] 权限检查正确（Android 相关）
 - [ ] **兼容性规范**（T2MCodingRule 八）：
   - [ ] 无使用 `@Deprecated` API
   - [ ] HAL / AIDL 接口修改向后兼容
-- [ ] **代码逻辑**：是否有明显错误、资源泄漏、死锁风险？
+- [ ] **代码逻辑**：明显错误、资源泄漏、死锁风险？
 
-**3. 问题定级**
+**问题定级：**
 
 | 级别 | 说明 | 对结果影响 |
 |---|---|---|
 | 🔴 CRITICAL | 编译错误、安全漏洞、严重数据风险 | 导致 FAIL |
 | 🟠 ERROR | 违反 T2MCodingRule 强制规则 | 导致 FAIL |
-| 🟡 WARNING | 建议改进、通用语言非 T2M 规范问题 | 不影响结果 |
+| 🟡 WARNING | 建议改进、非 T2M 覆盖语言问题 | 不影响结果 |
 | 🔵 INFO | 风格建议、可选优化 | 不影响结果 |
 
-#### 2C — 非 T2M 覆盖语言（通用质量审查）
+#### 3C — 非 T2M 覆盖语言（通用质量审查）
 
-仅检查以下项目（非 T2MCodingRule 规范，结果只给 WARNING / INFO）：
-- 明显的命名混乱（无意义变量名如 `a`, `tmp1`）
-- 重复代码块
-- 过长函数（>100 行）
-- 编译错误（如语法错误）
-- **有以下情况则升级为 CRITICAL**：安全凭证硬编码、SQL 注入风险
+- 命名混乱（无意义变量名）→ 🟡 WARNING
+- 重复代码块 → 🟡 WARNING
+- 函数过长（>100 行）→ 🟡 WARNING
+- 安全凭证硬编码、SQL 注入等 → 升级为 🔴 CRITICAL
 
 ---
 
-### 阶段三 — 生成 Review 报告
+### 阶段四 — 生成 Review 报告
 
-按以下格式生成报告（纯文本，用于 Gerrit comment 或输出到会话）：
+按以下格式生成报告（纯文本）：
 
 ```
 ============================
@@ -268,7 +348,7 @@ Code Review 报告
 ============================
 
 ## 提交信息审查
-{commit message 问题列表，无问题则写"✅ 符合规范"}
+{问题列表，无问题则写"✅ 符合规范"}
 
 ## 文件审查
 
@@ -277,7 +357,7 @@ Code Review 报告
 
 （每个问题格式：）
 [{级别}] 行 {line}: {问题描述}
-→ 原因：{违反的规范条目或质量原则}
+→ 原因：{违反的规范条目}
 → 建议：{具体修改建议}
 
 ============================
@@ -289,24 +369,24 @@ Code Review 报告
 ============================
 ```
 
-**判断结果（PASS/FAIL）规则：**
-- 存在任意 🔴 CRITICAL 或 🟠 ERROR → **FAIL**
-- 仅有 WARNING / INFO → **PASS**（报告中列出建议）
+**判断 PASS/FAIL：**
+- 有任意 🔴 CRITICAL 或 🟠 ERROR → **FAIL**
+- 仅有 WARNING / INFO → **PASS**
 
 ---
 
-### 阶段四 — 提交 Review 结果
+### 阶段五 — 提交 Review 结果
 
-#### 4A — 测试模式（默认）
+#### 5A — 测试模式（`test_mode: true`，默认）
 
-将报告**输出到当前会话**（不写 Gerrit）：
+将报告输出到当前会话（不写 Gerrit）：
 
 ```
 [测试模式] 以下为 Code Review 报告，未提交到 Gerrit：
 {报告内容}
 ```
 
-#### 4B — 正式模式（`test_mode: false`）
+#### 5B — 正式模式（`test_mode: false`）
 
 ```bash
 # 将报告保存到临时文件
@@ -314,8 +394,8 @@ cat > /tmp/review_report.txt << 'REPORT'
 {报告内容}
 REPORT
 
-# 提交到 Gerrit（自动判断 PASS/FAIL）
-python3 "$SKILL_WORKSPACE/scripts/post_review.py" \
+# 提交到 Gerrit
+python3 "$SKILL_DIR/scripts/post_review.py" \
   --workspace "$SKILL_WORKSPACE" \
   --change-id {change_id} \
   --revision {revision} \
@@ -323,8 +403,7 @@ python3 "$SKILL_WORKSPACE/scripts/post_review.py" \
   --result {PASS|FAIL}
 ```
 
-如果返回退出码 2，表示 test_mode 处于激活状态（报告未发送）。
-如果返回退出码 1，表示 Gerrit 写入失败，检查 Gerrit 配置。
+退出码说明：`0` = 成功，`1` = Gerrit 写入失败，`2` = test_mode 激活（未发送）
 
 ---
 
@@ -342,27 +421,53 @@ python3 "$SKILL_WORKSPACE/scripts/post_review.py" \
 | 6 | `$HOME/.config/agent_code_review_config.json` | |
 | 7 | `$HOME/agent_code_review_config.json` | |
 
-`{workspace}` = `SKILL_WORKSPACE` 环境变量的值，或脚本执行时的 `cwd`。
+`{workspace}` = `SKILL_WORKSPACE` 环境变量，`{skill-dir}` = `SKILL_DIR` 环境变量。
+
+### ensure_stream_listener.py 中 gerrit-api 安装目录检测顺序
+
+| 优先级 | 路径 |
+|---|---|
+| 1 | `GERRIT_API_SKILL_DIR` 环境变量 |
+| 2 | `{workspace}/.agents/skills/gerrit-api` |
+| 3 | `$HOME/.agents/skills/gerrit-api` |
+
+若自动检测失败，可手动设置：`export GERRIT_API_SKILL_DIR=/path/to/gerrit-api`
 
 ---
 
 ## 脚本 CLI 参考
+
+### ensure_stream_listener.py
+
+```
+python3 scripts/ensure_stream_listener.py [options]
+
+--workspace DIR        项目 workspace（覆盖 SKILL_WORKSPACE / cwd）
+--pid-file PATH        监听进程 PID 文件路径（默认 {workspace}/gerrit_stream_listener.pid）
+--events-file PATH     事件队列文件（默认配置文件中的 events_file 或 {workspace}/events.jsonl）
+--config FILE          agent_code_review_config.json 路径
+--gerrit-api-dir DIR   gerrit-api skill 目录（覆盖自动检测）
+--dry-run              仅检查，不启动进程
+--verbose              DEBUG 日志
+
+退出码：0=正常运行或启动成功，1=启动失败，2=gerrit-api 未安装
+```
 
 ### poll_events.py
 
 ```
 python3 scripts/poll_events.py [options]
 
---config FILE          指定 agent_code_review_config.json 路径
---workspace DIR        指定 workspace（覆盖 SKILL_WORKSPACE / cwd）
---events-file PATH     事件队列文件路径（覆盖配置文件中的 events_file）
---gerrit-config FILE   指定 gerrit_config.json 路径
---max-events N         最多处理 N 条事件（0 = 全部）
---dry-run              只读不清空队列，不拉 diff（调试用）
---verbose              启用 DEBUG 日志
-```
+--config FILE          agent_code_review_config.json 路径
+--workspace DIR        项目 workspace
+--events-file PATH     事件队列文件（覆盖配置）
+--gerrit-config FILE   gerrit_config.json 路径
+--max-events N         最多处理 N 条（0 = 全部）
+--dry-run              只读不清空队列，不拉 diff
+--verbose              DEBUG 日志
 
-输出：JSON 到 stdout，包含 `test_mode` 和 `events` 数组（含 diff 内容）。
+输出：JSON 到 stdout，含 test_mode 和 events 数组
+```
 
 ### post_review.py
 
@@ -371,17 +476,17 @@ python3 scripts/post_review.py [options]
 
 --change-id ID         Gerrit 变更编号（必填）
 --revision REV         Revision SHA 或 "current"（默认 current）
---report-file PATH     报告文本文件路径，"-" 表示读 stdin
+--report-file PATH     报告文件路径，"-" 表示读 stdin
 --result PASS|FAIL     审查结果（必填）
---config FILE          指定 agent_code_review_config.json
---gerrit-config FILE   指定 gerrit_config.json
---workspace DIR        指定 workspace
---force                强制发送（忽略 test_mode）
---dry-run              仅打印 payload，不发送
+--config FILE          配置文件路径
+--gerrit-config FILE   gerrit_config.json 路径
+--workspace DIR        项目 workspace
+--force                忽略 test_mode，强制发送到 Gerrit
+--dry-run              打印 payload，不发送
 --verbose              DEBUG 日志
-```
 
 退出码：0=成功，1=错误，2=test_mode 激活（未发送）
+```
 
 ---
 
@@ -389,56 +494,22 @@ python3 scripts/post_review.py [options]
 
 | 症状 | 检查项 | 解决方案 |
 |---|---|---|
-| `poll_events.py` 输出 `events: []` 且无日志 | 队列文件是否存在？ | 检查 `events_file` 路径；确认 stream listener 在运行 |
-| 队列文件存在但事件为空 | stream listener 是否已启动？filter 是否正确？ | 运行 `--dry-run --summary` 手工验证事件流 |
-| `Gerrit credentials not configured` | gerrit-api 是否已配置？ | 按 gerrit-api/SKILL.md 配置 Gerrit 凭据 |
-| `post_review.py` 退出码 2 | `test_mode: true` | 将配置中 `test_mode` 改为 `false`，或加 `--force` |
-| `post_review.py` HTTP 403 | Gerrit 账号缺少 Verified 标签权限 | 请 Gerrit 管理员授予项目 `Verified` 投票权限 |
+| `ensure_stream_listener.py` 退出码 2 | gerrit-api skill 未安装 | 按 Step 1 安装 gerrit-api |
+| 队列文件持续为空 | 监听进程有没有在运行？事件流有数据吗？ | 手动检查：`python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_stream_events.py" --dry-run --summary --max-events 3` |
+| `poll_events.py` 输出 `error` 字段 | Gerrit 凭据是否配置？ | 按 gerrit-api/SKILL.md 配置 Gerrit 凭据 |
+| `post_review.py` 退出码 2 | `test_mode: true` | 将 `test_mode` 改为 `false`，或加 `--force` |
+| `post_review.py` HTTP 403 | Gerrit 账号无 Verified 投票权限 | 请 Gerrit 管理员授权 |
 | `post_review.py` HTTP 401 | Gerrit 密码错误 | 重新生成 HTTP Credentials |
-| 报告未出现在 Gerrit | `test_mode` 未关闭 | 检查配置文件中 `test_mode` 字段 |
-| 路径错误（脚本找不到配置） | 未设置 `SKILL_WORKSPACE`，或会话中改变了目录 | 重新执行 Step 0（设置 SKILL_WORKSPACE） |
-
----
-
-## 附录：systemd 部署（生产环境）
-
-将 stream listener 注册为系统服务，确保重启后自动恢复：
-
-```ini
-# /etc/systemd/system/gerrit-stream-listener.service
-[Unit]
-Description=Gerrit stream-events listener for code review
-After=network.target
-
-[Service]
-User=your-user
-Environment=SKILL_WORKSPACE=/opt/code-review
-ExecStart=/usr/bin/python3 /opt/code-review/scripts/gerrit_stream_events.py \
-    --workspace /opt/code-review \
-    --output /opt/code-review/events.jsonl \
-    --filter patchset-created \
-    --reconnect
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable gerrit-stream-listener
-sudo systemctl start gerrit-stream-listener
-```
+| 路径错误 | `SKILL_DIR` 或 `SKILL_WORKSPACE` 未正确设置 | 重新执行 Step 0A + 0B |
 
 ---
 
 ## 安全注意事项
 
-- `agent_code_review_config.json` 包含 Gerrit 凭据路径引用，必须加入 `.gitignore`
-- 脚本日志中**不会打印** `password` 或 Gerrit HTTP 密码
-- 建议 `test_mode: true` 在新部署中保持默认开启，充分验证后再切换为 `false`
-- 正式模式下，Agent 有向 Gerrit 写数据（comment + Verified 标签）的权限，请确认授权范围
+- `agent_code_review_config.json` 必须加入 `.gitignore`
+- 脚本日志中**不会打印** Gerrit 密码或 hook token
+- 默认 `test_mode: true`，充分验证后再切换为 `false`
+- 正式模式下 agent 有写 Gerrit（comment + Verified 标签）的权限，请确认授权范围
 
 ---
 
@@ -449,6 +520,7 @@ agent-code-review/
 ├── SKILL.md                                    ← 本文件
 ├── README.md                                   ← 快速说明
 └── scripts/
+    ├── ensure_stream_listener.py               ← 健康检查 + 自动重启
     ├── poll_events.py                          ← 队列读取 + diff 拉取
     ├── post_review.py                          ← Gerrit comment + Verified 标签
     └── agent_code_review_config.json.example  ← 配置模板

@@ -11,11 +11,11 @@ description: "Use this skill whenever the user wants to interact with Jira or Co
 
 ---
 
-## ⚠️ Step 0 — Record Workspace (Do This First, Every Session)
+## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-> **Problem:** If you `cd` to a different directory during a task, config file search paths break.
->
-> **Fix:** Capture the workspace at the very start, before any `cd` commands.
+### Step 0A — 记录 Workspace
+
+> **问题：** `SKILL_WORKSPACE` 用于查找配置文件，和 skill 安装目录是两个不同的概念。如果在会话中 `cd` 切换目录，必须提前固定 `SKILL_WORKSPACE`。
 
 ```bash
 # Linux / macOS / Git Bash
@@ -28,7 +28,23 @@ set SKILL_WORKSPACE=%CD%
 $env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
-The `load_config()` helper reads `SKILL_WORKSPACE` automatically. Set it once and forget it.
+### Step 0B — 确认 Skill 安装目录（SKILL_DIR）
+
+> 注意：此 skill 通过 copy-paste 代码片段使用，不直接调用 skill 内的脚本，因此 `SKILL_DIR` 不影响日常使用。如果 agent 平台会自动设置 `SKILL_DIR`，则代码块中的 `_skill_dir()` 会自动生效。
+
+```bash
+# Linux / macOS — 检测并设置 SKILL_DIR（可选）
+export SKILL_DIR=$(python3 -c "
+import os, sys
+from pathlib import Path
+name = 'atlassian-jira-confluence'
+ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
+    if p.is_dir():
+        print(p); sys.exit(0)
+sys.exit(1)
+") 2>/dev/null || true
+```
 
 ---
 
@@ -198,15 +214,29 @@ _CONFIG_FILENAME = ".atlassian.json"
 
 
 def _workspace() -> Path:
-    """Return the project workspace directory.
+    """Return the agent's project workspace directory (for config / output files).
 
-    Reads SKILL_WORKSPACE env var first so the workspace stays correct even
-    when the calling process has changed its working directory mid-session
-    (e.g. OpenClaw / Copilot agents that cd into subdirectories).
+    Reads SKILL_WORKSPACE env var first — stays correct even when the calling
+    process cd's into subdirectories mid-session.
     Falls back to cwd() for backward compatibility.
     """
     ws = os.environ.get("SKILL_WORKSPACE", "").strip()
     return Path(ws).resolve() if ws else Path(os.getcwd())
+
+
+def _skill_dir() -> Path:
+    """Return this skill's installation directory (for own scripts / assets).
+
+    Priority: SKILL_DIR env var (set by platform) > Path(__file__) derivation.
+    This is DISTINCT from _workspace(), which is the agent's project directory.
+    """
+    sd = os.environ.get("SKILL_DIR", "").strip()
+    if sd:
+        return Path(sd).resolve()
+    # When this code is copy-pasted into an agent-generated script, __file__
+    # points to that script's location — not the skill dir.  SKILL_DIR env var
+    # is the reliable source; fall back gracefully.
+    return Path(__file__).resolve().parent
 
 
 def load_config() -> dict:
@@ -224,7 +254,7 @@ def load_config() -> dict:
     {workspace} = SKILL_WORKSPACE env var, or cwd when the script was started.
     """
     workspace = _workspace()
-    skill_dir = Path(__file__).resolve().parent  # adjust if script location differs
+    skill_dir = _skill_dir()
     home = Path.home()
 
     candidates = [

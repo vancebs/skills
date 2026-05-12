@@ -18,11 +18,11 @@ metadata:
 
 ---
 
-## ⚠️ Step 0 — Record Workspace (Do This First, Every Session)
+## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-> **Problem:** If you `cd` to a different directory during a task, relative paths break and config files cannot be found.
->
-> **Fix:** Capture the workspace as an absolute path at the very start, before any other commands.
+### Step 0A — 记录 Workspace
+
+> **问题：** `SKILL_WORKSPACE` 用于查找配置文件和输出文件，和 skill 安装目录是两个不同的概念。如果在会话中 `cd` 切换目录，`SKILL_WORKSPACE` 必须提前固定，否则配置文件无法找到。
 
 ```bash
 # Linux / macOS / Git Bash
@@ -35,18 +35,46 @@ set SKILL_WORKSPACE=%CD%
 $env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
-**Then always call scripts with an absolute path:**
-```bash
-# ✅ Correct — works no matter what directory you are in later
-python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+limit:5"
+### Step 0B — 确认 Skill 安装目录（SKILL_DIR）
 
-# ❌ Wrong — breaks if you cd somewhere else before calling
-python3 scripts/gerrit_api.py query "status:open+limit:5"
+> **问题：** `SKILL_WORKSPACE` 是 agent 的项目目录，**不是** skill 的安装目录。Skill 可能被安装在 workspace 的 `.agents/skills/` 子目录下，也可能是全局安装在用户主目录下。脚本必须从 skill 的实际安装路径调用。
+
+```bash
+# Linux / macOS — 自动检测并设置 SKILL_DIR
+export SKILL_DIR=$(python3 -c "
+import os, sys
+from pathlib import Path
+name = 'gerrit-api'
+ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
+    if p.is_dir():
+        print(p); sys.exit(0)
+sys.exit(1)
+") || {
+    echo "ERROR: gerrit-api skill not found."
+    echo "Install: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
+}
+
+# Windows PowerShell — 自动检测并设置 SKILL_DIR
+$skillName = 'gerrit-api'
+$env:SKILL_DIR = @(
+    "$env:SKILL_WORKSPACE\.agents\skills\$skillName",
+    "$HOME\.agents\skills\$skillName"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $env:SKILL_DIR) {
+    Write-Error "Skill '$skillName' not found. Install: npx skills add https://github.com/vancebs/skills --skill $skillName"
+}
 ```
 
-The scripts automatically read `SKILL_WORKSPACE` to locate the config file. You can also pass it explicitly:
+> 如果 agent 平台会自动设置 `SKILL_DIR`，则无需手动检测。
+
+**调用脚本时始终使用 `$SKILL_DIR`（不要用 `$SKILL_WORKSPACE`）：**
 ```bash
-python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" --workspace "$SKILL_WORKSPACE" ...
+# ✅ 正确 — 使用 skill 安装路径
+python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+limit:5"
+
+# ❌ 错误 — SKILL_WORKSPACE 是项目目录，不是 skill 安装目录
+python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+limit:5"
 ```
 
 ---
@@ -68,8 +96,8 @@ ssh -V              # must be installed (for stream-events only)
 # Create directory at the recommended (highest-priority) location
 mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
 
-# Copy the template
-cp "$SKILL_WORKSPACE/scripts/gerrit_config.json.example" \
+# Copy the template from the skill's installation directory
+cp "$SKILL_DIR/scripts/gerrit_config.json.example" \
    "$SKILL_WORKSPACE/config/gerrit-api/gerrit_config.json"
 
 # Edit with your real credentials
@@ -103,7 +131,7 @@ config/gerrit-api/gerrit_config.json
 ### Step 3 — Test the Connection
 
 ```bash
-python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+limit:1"
+python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+limit:1"
 ```
 
 Expected: JSON output with change data. If you see an error, see **Troubleshooting** below.
@@ -120,7 +148,7 @@ Expected: `gerrit version 3.x.x`
 
 ## ⚡ Quick Reference — REST API Commands
 
-All commands follow the pattern: `python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" <command> [args]`
+All commands follow the pattern: `python3 "$SKILL_DIR/scripts/gerrit_api.py" <command> [args]`
 
 | Task | Command |
 |---|---|
@@ -151,25 +179,25 @@ Use this when you need to perform a code review on a Gerrit change.
 - [ ] 1. Record workspace: `export SKILL_WORKSPACE="$(pwd)"`
 - [ ] 2. Find changes needing review:
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open+reviewer:self+-owner:self"
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+reviewer:self+-owner:self"
   ```
 - [ ] 3. Get the change details for change `<id>`:
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" get-change <id>
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" get-change <id>
   ```
 - [ ] 4. List modified files:
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" list-files <id>
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" list-files <id>
   ```
 - [ ] 5. Review each file's diff:
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" get-diff <id> "path/to/file.java"
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" get-diff <id> "path/to/file.java"
   ```
 - [ ] 6. Post review (choose one option):
 
   **Option A — Inline comments + label in one call:**
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" review <id> current '{
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" review <id> current '{
     "message": "Review comment here.",
     "labels": {"Code-Review": 1},
     "comments": {
@@ -183,16 +211,16 @@ Use this when you need to perform a code review on a Gerrit change.
   **Option B — Draft comments first, then publish:**
   ```bash
   # Add draft (repeat for each comment)
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" create-draft <id> current \
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" create-draft <id> current \
     '{"path":"path/to/file.java","line":42,"message":"Consider a constant.","unresolved":true}'
   # Publish all drafts with a label
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" review <id> current \
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" review <id> current \
     '{"message":"See inline comments.","labels":{"Code-Review":-1},"drafts":"PUBLISH"}'
   ```
 
 - [ ] 7. (Optional) Submit if approved:
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" submit <id>
+  python3 "$SKILL_DIR/scripts/gerrit_api.py" submit <id>
   ```
 
 **Label values** (project-specific, typical):
@@ -219,13 +247,13 @@ Use this when you need to react to Gerrit events in real time or collect events 
 - [ ] 2. Test SSH: `ssh -p 29418 <username>@<host> gerrit version`
 - [ ] 3. Test with dry run (no file writes, verify events arrive):
   ```bash
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" \
+  python3 "$SKILL_DIR/scripts/gerrit_stream_events.py" \
     --workspace "$SKILL_WORKSPACE" --dry-run --summary --max-events 5
   ```
 - [ ] 4. Start the background listener:
   ```bash
   # Write to file + auto-reconnect
-  python3 "$SKILL_WORKSPACE/scripts/gerrit_stream_events.py" \
+  python3 "$SKILL_DIR/scripts/gerrit_stream_events.py" \
     --workspace "$SKILL_WORKSPACE" \
     --output "$SKILL_WORKSPACE/events.jsonl" \
     --reconnect --quiet &
@@ -383,10 +411,13 @@ Description=Gerrit stream-events listener
 After=network.target
 
 [Service]
-Environment=SKILL_WORKSPACE=/opt/gerrit
-ExecStart=/usr/bin/python3 /opt/gerrit/scripts/gerrit_stream_events.py \
-    --workspace /opt/gerrit \
-    --output /var/log/gerrit/events.jsonl \
+# SKILL_WORKSPACE = agent's project dir (for config file & events.jsonl)
+# SKILL_DIR       = gerrit-api skill installation directory
+Environment=SKILL_WORKSPACE=/opt/gerrit-workspace
+Environment=SKILL_DIR=/home/user/.agents/skills/gerrit-api
+ExecStart=/usr/bin/python3 ${SKILL_DIR}/scripts/gerrit_stream_events.py \
+    --workspace ${SKILL_WORKSPACE} \
+    --output ${SKILL_WORKSPACE}/events.jsonl \
     --hook-url http://127.0.0.1:8443/events \
     --hook-token *** \
     --reconnect
@@ -433,11 +464,11 @@ Every event has these extra fields added by the script:
 | `HTTP 401 Unauthorized` | HTTP password correct? | Re-generate at Gerrit → Settings → HTTP Credentials |
 | `HTTP 404 Not Found` | Change number exists? URL has trailing slash? | Verify change number; remove trailing slash from `url` |
 | `HTTP 409 Conflict` | Trying to review a change-edit? Missing approvals for submit? | Check change status in Gerrit UI |
-| Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" help` to see search paths |
+| Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 "$SKILL_DIR/scripts/gerrit_api.py" help` to see search paths |
 | Wrong workspace used | Did you `cd` before calling scripts? | Set `SKILL_WORKSPACE` before any `cd` commands |
 | SSH auth fails | SSH key uploaded to Gerrit? Right user/port? | Run `ssh -p 29418 <user>@<host> gerrit version` to test |
 | SSH "access denied" | Account lacks Stream Events capability | Ask Gerrit admin to grant under Global Capabilities |
-| Script path error | Using relative path after a `cd`? | Always use `python3 "$SKILL_WORKSPACE/scripts/..."` |
+| Script path error | Using relative path after a `cd`? | Always use `python3 "$SKILL_DIR/scripts/..."` |
 
 ---
 

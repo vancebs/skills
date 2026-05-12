@@ -52,19 +52,34 @@ _SKILL_NAME = "gerrit-api"
 _CONFIG_FILENAME = "gerrit_config.json"
 
 
-# ─── Workspace resolution ─────────────────────────────────────────────────────
+# ─── Workspace / skill-dir resolution ────────────────────────────────────────
 
 def _workspace() -> Path:
-    """Return the project workspace directory.
+    """Return the **agent's project workspace** directory.
 
-    Reads SKILL_WORKSPACE env var first so the workspace stays correct even
-    when the calling process has changed its working directory mid-session
-    (e.g. OpenClaw / Copilot agents that cd into subdirectories).
+    Used for finding config files and output files that belong to the project.
+    Priority: SKILL_WORKSPACE env var > cwd.
 
-    Falls back to cwd() for backward compatibility.
+    NOTE: Do NOT use this to locate this skill's own scripts or assets.
+    Use _skill_dir() for that.
     """
     ws = os.environ.get("SKILL_WORKSPACE", "").strip()
     return Path(ws).resolve() if ws else Path.cwd()
+
+
+def _skill_dir() -> Path:
+    """Return this skill's installation directory.
+
+    Used for locating this skill's own scripts, example files, etc.
+    Priority: SKILL_DIR env var (set by the agent platform) > derivation from
+    __file__ (scripts/ is one level below the skill root).
+
+    Distinct from _workspace(), which is the agent's project directory.
+    """
+    sd = os.environ.get("SKILL_DIR", "").strip()
+    if sd:
+        return Path(sd).resolve()
+    return Path(__file__).resolve().parent.parent  # scripts/../ == gerrit-api/
 
 
 # ─── Config loading ───────────────────────────────────────────────────────────
@@ -72,7 +87,7 @@ def _workspace() -> Path:
 def _find_config_file() -> str | None:
     """Return the first config file found across the priority search paths."""
     workspace = _workspace()
-    skill_dir = Path(__file__).parent.parent  # gerrit-api/
+    skill_dir = _skill_dir()
     home = Path.home()
 
     candidates = [

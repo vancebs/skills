@@ -124,18 +124,33 @@ _CONFIG_FILENAME = "gerrit_config.json"
 # ─── Workspace resolution ─────────────────────────────────────────────────────
 
 def _workspace(explicit: str | None = None) -> Path:
-    """Return the project workspace directory.
+    """Return the **agent's project workspace** directory.
 
-    Priority: --workspace arg > SKILL_WORKSPACE env var > cwd.
+    Used for finding config files and output files that belong to the project.
+    Priority: explicit arg > SKILL_WORKSPACE env var > cwd.
 
-    This ensures config-file lookup stays correct even when the calling
-    process changes its working directory mid-session (e.g. OpenClaw /
-    Copilot agents that cd into subdirectories).
+    NOTE: Do NOT use this to locate this skill's own scripts or assets.
+    Use _skill_dir() for that.
     """
     if explicit:
         return Path(explicit).resolve()
     ws = os.environ.get("SKILL_WORKSPACE", "").strip()
     return Path(ws).resolve() if ws else Path.cwd()
+
+
+def _skill_dir() -> Path:
+    """Return this skill's installation directory.
+
+    Used for locating this skill's own scripts, example files, etc.
+    Priority: SKILL_DIR env var (set by the agent platform) > derivation from
+    __file__ (scripts/ is one level below the skill root).
+
+    Distinct from _workspace(), which is the agent's project directory.
+    """
+    sd = os.environ.get("SKILL_DIR", "").strip()
+    if sd:
+        return Path(sd).resolve()
+    return Path(__file__).resolve().parent.parent  # scripts/../ == gerrit-api/
 
 
 # ─── Config loading ───────────────────────────────────────────────────────────
@@ -154,13 +169,13 @@ def _find_config_file(explicit_path: str | None, ws: Path | None = None) -> str 
       8. $HOME/{filename}
 
     {workspace} = SKILL_WORKSPACE env var, or --workspace arg, or cwd
-    {skill-dir} = gerrit-api/ directory (parent of this scripts/ folder)
+    {skill-dir} = skill installation directory (SKILL_DIR env var or __file__ derivation)
     """
     if explicit_path:
         return explicit_path if Path(explicit_path).is_file() else None
 
     workspace = ws or _workspace()
-    skill_dir = Path(__file__).parent.parent  # gerrit-api/
+    skill_dir = _skill_dir()
     home = Path.home()
 
     candidates = [

@@ -37,9 +37,13 @@ _GERRIT_SKILL_NAME = "gerrit-api"
 
 
 def _workspace(explicit: str | None = None) -> Path:
-    """Return the project workspace as an absolute Path.
+    """Return the **agent's project workspace** directory.
 
+    Used for finding config files and output files that belong to the project.
     Priority: explicit arg > SKILL_WORKSPACE env var > cwd.
+
+    NOTE: Do NOT use this to locate this skill's own scripts or assets.
+    Use _skill_dir() for that.
     """
     if explicit:
         return Path(explicit).resolve()
@@ -47,10 +51,38 @@ def _workspace(explicit: str | None = None) -> Path:
     return Path(ws).resolve() if ws else Path(os.getcwd())
 
 
+def _skill_dir() -> Path:
+    """Return this skill's installation directory.
+
+    Used for locating this skill's own scripts, example files, etc.
+    Priority: SKILL_DIR env var (set by the agent platform) > derivation from
+    __file__ (scripts/ is one level below the skill root).
+    """
+    sd = os.environ.get("SKILL_DIR", "").strip()
+    if sd:
+        return Path(sd).resolve()
+    return Path(__file__).resolve().parent.parent  # scripts/../ == agent-code-review/
+
+
+def _find_other_skill_dir(skill_name: str, ws: Path) -> Path | None:
+    """Find the installation directory of another skill.
+
+    Tries workspace-local installation first, then global user installation.
+    """
+    candidates = [
+        ws / ".agents" / "skills" / skill_name,
+        Path.home() / ".agents" / "skills" / skill_name,
+    ]
+    for p in candidates:
+        if p.is_dir():
+            return p
+    return None
+
+
 def _find_config_file(filename: str, skill_name: str, ws: Path) -> Path | None:
     """Search for *filename* across the 7-path priority list."""
     home = Path.home()
-    skill_dir = Path(__file__).resolve().parent.parent  # agent-code-review/
+    skill_dir = _skill_dir()
 
     candidates = [
         ws / "config" / skill_name / filename,

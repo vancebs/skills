@@ -43,15 +43,24 @@ _GERRIT_SKILL_NAME = "gerrit-api"
 
 
 def _workspace(explicit: str | None = None) -> Path:
+    """Return the agent's project workspace directory (for config/output files)."""
     if explicit:
         return Path(explicit).resolve()
     ws = os.environ.get("SKILL_WORKSPACE", "").strip()
     return Path(ws).resolve() if ws else Path(os.getcwd())
 
 
+def _skill_dir() -> Path:
+    """Return this skill's installation directory (for own scripts/assets)."""
+    sd = os.environ.get("SKILL_DIR", "").strip()
+    if sd:
+        return Path(sd).resolve()
+    return Path(__file__).resolve().parent.parent  # scripts/../ == agent-code-review/
+
+
 def _find_config_file(filename: str, skill_name: str, ws: Path) -> Path | None:
     home = Path.home()
-    skill_dir = Path(__file__).resolve().parent.parent
+    skill_dir = _skill_dir()
     candidates = [
         ws / "config" / skill_name / filename,
         ws / "config" / filename,
