@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy this file to {workspace}/config/agent-code-review/agent_code_review_config.json",
+  "test_mode": true,
+  "events_file": "",
+  "outbox_file": "",
+  "review_projects": [],
+  "review_branches": [],
+  "skip_file_patterns": []
+}
