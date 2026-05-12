@@ -329,7 +329,7 @@ python3 "$SKILL_DIR/scripts/poll_events.py" \
 - 命名混乱（无意义变量名）→ 🟡 WARNING
 - 重复代码块 → 🟡 WARNING
 - 函数过长（>100 行）→ 🟡 WARNING
-- 安全凭证硬编码、SQL 注入等 → 升级为 🔴 CRITICAL
+- 编译错误（如语法错误）、安全凭证硬编码、SQL 注入等 → 升级为 🔴 CRITICAL
 
 ---
 
