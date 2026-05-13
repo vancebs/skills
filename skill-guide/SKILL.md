@@ -486,6 +486,14 @@ print("\n" + "=" * 60)
 
 ## 🛠️ Skill 创建规范（Skill Authoring Guide）
 
+> **依赖说明：** 本节是对 **skill-creator** skill 的补充规范，聚焦于"如何让弱模型也能正确执行 skill"。
+> 使用 skill-creator 创建新 skill 时，请同时遵循本节规范。
+>
+> 安装 skill-creator（如未安装）：
+> ```
+> npx skills add skill-creator
+> ```
+
 本节为 skill 作者提供编写规范，目标：**让能力较弱的模型也能准确理解和执行 skill，减少歧义与执行偏差。**
 
 ---
@@ -841,6 +849,217 @@ mode 可以是测试或者正式模式，具体根据场景选择。
 Exit code:
   0 = 全部通过
   1 = 有 ❌ 项（模型应停止并引导用户修复）
+```
+
+---
+
+### 规范 9：模板与参考（非脚本操作）
+
+**原则：** 凡是需要模型自行执行的命令、代码片段或配置，必须在 SKILL.md 中提供**完整可用的模板或示例**，不能仅靠自然语言描述让模型自行生成。
+
+#### 9.1 何时提供模板
+
+| 操作类型 | 要求 |
+|----------|------|
+| shell 命令 | 完整命令，用 `<占位符>` 标注需要替换的部分 |
+| 配置文件 | 提供 `.example` 文件 + 关键字段说明表 |
+| 代码片段（Python/JS 等） | 提供完整可运行片段，含 import 和入口 |
+| API 请求 Body | 提供完整 JSON 示例 + Schema 表 |
+| 正则表达式 | 提供表达式 + 至少 2 个匹配示例和 1 个不匹配示例 |
+
+#### 9.2 模板格式规范
+
+模板中需替换的占位符统一使用 `<大写下划线>` 格式，并在模板后附说明表：
+
+````markdown
+**命令模板：**
+```bash
+python3 "$SKILL_DIR/scripts/review_job.py" \
+  --workspace "<WORKSPACE_PATH>" \
+  --project "<GERRIT_PROJECT_NAME>" \
+  --max-events <MAX_EVENTS>
+```
+
+**占位符说明：**
+
+| 占位符 | 示例值 | 说明 |
+|--------|--------|------|
+| `<WORKSPACE_PATH>` | `/home/user/myproject` | 绝对路径，对应 SKILL_WORKSPACE |
+| `<GERRIT_PROJECT_NAME>` | `platform/frameworks/base` | Gerrit 中的项目名，区分大小写 |
+| `<MAX_EVENTS>` | `10` | 每次运行处理的最大事件数，整数，默认 10 |
+````
+
+#### 9.3 配置文件示例规范
+
+每个需要配置的 skill 必须提供 `scripts/config.json.example`，且：
+- 文件内的所有占位符值使用 `"<FIELD_NAME>"` 格式（字符串类型）或 `0` / `false`（数值/布尔类型）
+- 文件必须是合法 JSON（不含注释）
+- SKILL.md 中必须有对应字段说明表（见规范 7.5）
+
+```json
+{
+  "gerrit": {
+    "host": "<GERRIT_HOST>",
+    "port": 29418,
+    "http_port": 8080,
+    "username": "<GERRIT_USERNAME>",
+    "http_password": "<HTTP_PASSWORD>"
+  },
+  "review": {
+    "test_mode": true,
+    "project_filter": ""
+  }
+}
+```
+
+---
+
+### 规范 10：Prompt 模板（限制模型自由操作空间）
+
+**原则：** 对于需要模型在特定 agent 平台（如 OpenClaw）执行的复杂操作，SKILL.md 必须提供**直接可用的 prompt 模板**，让模型只需填入少量参数即可，而不是自行理解并生成操作。
+
+**目标：** 减少模型理解偏差，确保弱模型在执行 skill 时的行为与预期一致。
+
+#### 10.1 何时提供 Prompt 模板
+
+凡是以下类型的操作，必须提供 prompt 模板：
+
+| 操作类型 | 说明 |
+|----------|------|
+| 建立定时任务（cron / scheduler）| 不同平台设置方式差异大，必须给模板 |
+| 启动/停止后台进程 | 涉及 PID 管理、重启逻辑 |
+| 发送消息到指定会话/频道 | 消息格式和目标选择容易出错 |
+| 调用另一个 skill | 需要精确的 skill 名称和参数格式 |
+| 多步骤需要上下文传递 | 中间结果如何传给下一步 |
+
+#### 10.2 Prompt 模板格式
+
+在 SKILL.md 中，用固定格式给出每种平台的 prompt 模板：
+
+````markdown
+### Prompt 模板：[操作名称]
+
+> **适用平台：** OpenClaw / 通用 cron / Windows 任务计划程序
+
+**[平台名] Prompt：**
+
+```
+<直接粘贴给模型的 prompt，含占位符>
+```
+
+**占位符说明：**
+
+| 占位符 | 示例值 | 说明 |
+|--------|--------|------|
+| `<PLACEHOLDER>` | `example` | 说明 |
+````
+
+#### 10.3 常用 Prompt 模板示例
+
+**示例 A：OpenClaw — 建立定时任务（cron job）**
+
+````markdown
+### Prompt 模板：OpenClaw 建立定时 cron job
+
+**OpenClaw Prompt：**
+
+```
+请为我建立一个每 <INTERVAL> 分钟运行一次的定时任务，执行以下操作：
+
+1. 运行脚本: python3 "<SKILL_DIR>/scripts/<SCRIPT_NAME>.py" --workspace "<WORKSPACE_PATH>"
+2. 将脚本的 stdout 输出作为输入，继续执行以下步骤：
+   <STEPS_DESCRIPTION>
+3. 如果脚本 exit code 为 1，停止本次任务并在聊天中显示错误信息（来自 stderr）。
+4. 如果脚本 exit code 为 2，<SPECIAL_CASE_HANDLING>
+
+定时任务建立后，请确认任务已注册，并告知下次运行时间。
+```
+
+**占位符说明：**
+
+| 占位符 | 示例值 | 说明 |
+|--------|--------|------|
+| `<INTERVAL>` | `1` | 运行间隔（分钟），整数 |
+| `<SKILL_DIR>` | `/home/user/.agents/skills/agent-code-review` | skill 安装目录绝对路径 |
+| `<SCRIPT_NAME>` | `review_job` | 脚本文件名（不含 .py） |
+| `<WORKSPACE_PATH>` | `/home/user/myproject` | 项目工作目录绝对路径 |
+| `<STEPS_DESCRIPTION>` | 见下方业务说明 | 模型在读取 JSON 输出后要执行的动作 |
+| `<SPECIAL_CASE_HANDLING>` | `将输出打印到当前会话` | exit code 2 的特殊处理逻辑 |
+````
+
+**示例 B：OpenClaw — 检查进程存活并在必要时重启**
+
+````markdown
+### Prompt 模板：OpenClaw 检查并重启后台进程
+
+**OpenClaw Prompt：**
+
+```
+请检查以下后台进程是否在运行，如果没有则重新启动：
+
+进程标识：PID 文件路径为 "<WORKSPACE_PATH>/<PID_FILENAME>"
+检查方法：
+  1. 读取 PID 文件（若文件不存在，视为进程未运行）
+  2. 检查该 PID 对应进程是否存活（在 Linux/macOS 用 `kill -0 <PID>`，Windows 用 tasklist）
+  3. 如果进程未运行，执行以下命令启动：
+     python3 "<SKILL_DIR>/scripts/<SCRIPT_NAME>.py" --workspace "<WORKSPACE_PATH>" <EXTRA_ARGS>
+  4. 启动后将新 PID 写入 PID 文件
+
+完成后告知进程状态（running / restarted / failed）。
+```
+
+**占位符说明：**
+
+| 占位符 | 示例值 | 说明 |
+|--------|--------|------|
+| `<WORKSPACE_PATH>` | `/home/user/myproject` | 项目工作目录绝对路径 |
+| `<PID_FILENAME>` | `gerrit_listener.pid` | PID 文件名 |
+| `<SKILL_DIR>` | `/home/user/.agents/skills/gerrit-api` | skill 安装目录绝对路径 |
+| `<SCRIPT_NAME>` | `gerrit_stream_events` | 脚本文件名（不含 .py） |
+| `<EXTRA_ARGS>` | `--output events.jsonl --reconnect` | 额外命令行参数 |
+````
+
+**示例 C：OpenClaw — 发送报告到指定会话（test_mode）**
+
+````markdown
+### Prompt 模板：OpenClaw 发送 Code Review 报告到会话
+
+**OpenClaw Prompt（exit code 为 2 时使用）：**
+
+```
+脚本已完成分析，请将以下 Code Review 报告发送到会话 "<SESSION_ID>"：
+
+<REPORT_CONTENT>
+
+发送后无需等待回复，继续下一次定时任务。
+```
+
+**占位符说明：**
+
+| 占位符 | 示例值 | 说明 |
+|--------|--------|------|
+| `<SESSION_ID>` | `session-abc123` | 目标会话 ID（从配置或用户输入获取）|
+| `<REPORT_CONTENT>` | （脚本 stdout 内容）| 直接插入脚本输出的报告文本 |
+````
+
+#### 10.4 Prompt 模板使用原则
+
+1. **每个 prompt 模板必须标注"适用平台"**（OpenClaw / 通用 / Windows 等）
+2. **占位符必须有说明表**，不能让模型自行猜测含义
+3. **模板不能包含歧义判断**，即不能有"根据情况决定"等模糊说法
+4. **提供至少一个完整填写后的示例**（将所有占位符替换为实际值）
+
+**完整示例（填写后）：**
+
+```
+请为我建立一个每 1 分钟运行一次的定时任务，执行以下操作：
+
+1. 运行脚本: python3 "/home/user/.agents/skills/agent-code-review/scripts/review_job.py" --workspace "/home/user/myproject"
+2. 将脚本的 stdout 输出（JSON 格式）解析后，对其中 events 数组的每个条目进行 code review。
+3. 如果脚本 exit code 为 1，停止本次任务并在聊天中显示错误信息（来自 stderr）。
+4. 如果脚本 exit code 为 2，表示 test_mode，将审查报告打印到当前会话。
+
+定时任务建立后，请确认任务已注册，并告知下次运行时间。
 ```
 
 ---
