@@ -362,13 +362,32 @@ python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
 **解决方案：** 为每个 skill 使用独立的命名变量：
 
 ```bash
-# ✅ 为不同 skill 使用不同变量名
+# ✅ Linux / macOS / Git Bash
 export GERRIT_API_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/gerrit-api"
 export CODE_REVIEW_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/agent-code-review"
 
 # 调用时明确指定
 python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" ...
 python3 "$CODE_REVIEW_SKILL_DIR/scripts/poll_events.py" ...
+```
+
+```powershell
+# ✅ Windows PowerShell
+$env:GERRIT_API_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\gerrit-api"
+$env:CODE_REVIEW_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\agent-code-review"
+
+# 调用时明确指定
+python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" ...
+python "$env:CODE_REVIEW_SKILL_DIR\scripts\poll_events.py" ...
+```
+
+```batch
+:: ✅ Windows CMD
+set GERRIT_API_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\gerrit-api
+set CODE_REVIEW_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\agent-code-review
+
+python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" ...
+python "%CODE_REVIEW_SKILL_DIR%\scripts\poll_events.py" ...
 ```
 
 ---
@@ -467,13 +486,23 @@ print("\n" + "=" * 60)
 │  SKILL_WORKSPACE  = 项目目录（配置/输出文件）            │
 │  SKILL_DIR        = skill 安装目录（脚本/资产）          │
 ├─────────────────────────────────────────────────────────┤
-│  会话开始：                                              │
+│  会话开始（Linux/macOS）：                               │
 │    export SKILL_WORKSPACE="$(pwd)"                      │
 │    export SKILL_DIR=$(detect-skill-dir "skill-name")    │
+│  会话开始（Windows PowerShell）：                        │
+│    $env:SKILL_WORKSPACE = (Get-Location).Path           │
+│    $env:SKILL_DIR = "<绝对路径>"                        │
+│  会话开始（Windows CMD）：                               │
+│    set SKILL_WORKSPACE=%CD%                             │
+│    set SKILL_DIR=<绝对路径>                             │
 ├─────────────────────────────────────────────────────────┤
-│  调用脚本：  python3 "$SKILL_DIR/scripts/xxx.py"        │
-│  配置文件：  $SKILL_WORKSPACE/config/{skill}/{file}     │
-│  输出文件：  $SKILL_WORKSPACE/{file}                    │
+│  调用脚本（Linux/macOS）：                               │
+│    python3 "$SKILL_DIR/scripts/xxx.py"                  │
+│  调用脚本（Windows）：                                   │
+│    python "%SKILL_DIR%\scripts\xxx.py"                  │
+├─────────────────────────────────────────────────────────┤
+│  配置文件：  {SKILL_WORKSPACE}/config/{skill}/{file}    │
+│  输出文件：  {SKILL_WORKSPACE}/{file}                   │
 ├─────────────────────────────────────────────────────────┤
 │  cd 之前：确保环境变量已设置（不受 cd 影响）             │
 │  多 skill：为每个 skill 用不同变量名                    │
@@ -502,12 +531,22 @@ print("\n" + "=" * 60)
 
 | 原则 | 说明 |
 |------|------|
+| **跨平台优先** | skill 默认兼顾 Windows、Linux、macOS。若某功能无法跨平台，作者必须在 SKILL.md 中注明并询问用户平台 |
 | **简洁无歧义** | 语言直白，不用隐喻。一句话只表达一件事 |
 | **结构化层层递进** | 先给高层概述，再给详细细节，让强弱模型都能理解 |
 | **脚本优先** | 不需要模型做决策的操作，用脚本实现；脚本优先 Python（stdlib）|
 | **正则约束** | 涉及文本匹配的地方，给出正则表达式，避免模型自行猜测格式 |
 | **流程可视化** | 业务流程用 Mermaid 图表达，异常处理必须显式写出 |
 | **Checklist 驱动** | 每个步骤配 checklist，让模型可以逐项确认 |
+
+> **⚠️ 跨平台声明规则：**
+> - 所有命令、脚本、路径操作默认同时支持 Windows（CMD/PowerShell）和 Linux/macOS（bash/zsh）
+> - 若某个步骤只能在特定平台运行，必须在该步骤顶部加注：`> ⚠️ 仅支持 <平台名>。其他平台请参考：<替代方案或跳过说明>`
+> - 若 skill 整体无法跨平台，作者在编写 SKILL.md 前必须询问：
+>   ```
+>   此 skill 中的 [功能名] 目前只能在 [平台] 上运行。
+>   请问您使用的是哪个平台？（Windows / Linux / macOS）
+>   ```
 
 ---
 
@@ -594,22 +633,52 @@ keywords: [关键词1, 关键词2, ...]
 # 3. 结构化输出：stdout 输出 JSON（供模型解析），日志输出到 stderr
 # 4. 异常情况输出 {"status": "error", "message": "..."} 而非直接 raise
 # 5. 支持 --dry-run 参数，用于调试
+# 6. 路径操作使用 pathlib.Path，不拼接字符串
 
 import argparse, json, sys
+from pathlib import Path
 
 def main():
     p = argparse.ArgumentParser(description="Script description")
-    p.add_argument("--workspace", required=True, help="Project workspace directory")
+    p.add_argument("--workspace", required=True, help="Project workspace directory (absolute path)")
     p.add_argument("--dry-run", action="store_true", help="Print actions without executing")
     args = p.parse_args()
 
+    workspace = Path(args.workspace)  # 不要用 os.path.join 拼接字符串
+
     try:
-        result = do_work(args)
+        result = do_work(workspace, args)
         print(json.dumps(result, ensure_ascii=False))
         sys.exit(0)
     except Exception as e:
         print(json.dumps({"status": "error", "message": str(e)}), file=sys.stderr)
         sys.exit(1)
+```
+
+**跨平台要求（脚本编写）：**
+
+| 禁止 | 替代 |
+|------|------|
+| `os.system("kill -0 <pid>")` | `os.kill(pid, 0)` — Python stdlib，跨平台 |
+| `subprocess.run(["tasklist"])` | 见下方进程检查示例 |
+| 路径拼接：`dir + "/" + file` | `Path(dir) / file` |
+| 硬编码 `/tmp/` | `Path(tempfile.gettempdir())` |
+| `os.chmod(path, 0o755)` | 允许，但需在 Windows 上 `try/except` 忽略错误 |
+| `os.fork()` | 不跨平台，使用 `subprocess.Popen` 替代 |
+| `signal.SIGKILL` | 用 `process.terminate()` + `process.wait()` |
+
+**跨平台进程存活检查（Python stdlib）：**
+
+```python
+import os
+
+def is_process_alive(pid: int) -> bool:
+    """跨平台进程存活检查（不依赖 kill 命令）"""
+    try:
+        os.kill(pid, 0)   # signal 0: 只检查进程是否存在，不发送信号
+        return True
+    except OSError:
+        return False
 ```
 
 ---
@@ -643,6 +712,8 @@ def main():
 | ISO 8601 时间戳 | `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}` | `2026-05-13T14:00:00Z` |
 | HTTP URL | `^https?://[^\s]+$` | `http://127.0.0.1:8443` |
 | 文件路径（POSIX） | `^/[^\0]+$` | `/home/user/config.json` |
+| 文件路径（Windows） | `^[A-Za-z]:\\[^\0]*$` | `C:\Users\user\config.json` |
+| 文件路径（跨平台，Python Path.is_absolute() 验证）| N/A | 使用 `Path(p).is_absolute()` |
 | JSONL 行（完整） | `^\{.*\}\n$` | `{"type":"..."}\n` |
 | Semantic version | `^\d+\.\d+\.\d+$` | `3.9.0` |
 
@@ -997,16 +1068,25 @@ python3 "$SKILL_DIR/scripts/review_job.py" \
 ```
 请检查以下后台进程是否在运行，如果没有则重新启动：
 
-进程标识：PID 文件路径为 "<WORKSPACE_PATH>/<PID_FILENAME>"
-检查方法：
-  1. 读取 PID 文件（若文件不存在，视为进程未运行）
-  2. 检查该 PID 对应进程是否存活（在 Linux/macOS 用 `kill -0 <PID>`，Windows 用 tasklist）
-  3. 如果进程未运行，执行以下命令启动：
+检查步骤（跨平台，使用 Python）：
+  1. 运行以下 Python 脚本检查进程状态：
+
+     python3 "<SKILL_DIR>/scripts/check_listener.py" --pid-file "<WORKSPACE_PATH>/<PID_FILENAME>"
+
+     （Windows 用 python 代替 python3）
+
+  2. 如果脚本输出 "status: running"，无需操作。
+  3. 如果脚本输出 "status: dead" 或 "status: missing"，执行以下命令启动进程：
+
      python3 "<SKILL_DIR>/scripts/<SCRIPT_NAME>.py" --workspace "<WORKSPACE_PATH>" <EXTRA_ARGS>
-  4. 启动后将新 PID 写入 PID 文件
+
+  4. 启动后，将新进程 PID 写入 "<WORKSPACE_PATH>/<PID_FILENAME>"
 
 完成后告知进程状态（running / restarted / failed）。
 ```
+
+> **注意：** check_listener.py 必须是跨平台的 Python 脚本（stdlib os.getpid() 或 psutil 可选），
+> 不得在 prompt 中直接使用 `kill -0`（Linux only）或 `tasklist`（Windows only）。
 
 **占位符说明：**
 
