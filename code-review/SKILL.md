@@ -1,36 +1,35 @@
 ---
 name: code-review
 description: >
-  Focused code review agent skill. Given a Gerrit change identifier (page URL,
-  change-id, commit-id, or stream event JSON), fetches the patch and diffs via
-  Gerrit REST API, performs code review per T2MCodingRule, and posts results
-  back to Gerrit. No event listener or cron job required — triggered on demand
-  by the agent receiving Gerrit change information.
+  Focused on-demand code review skill. When the agent receives Gerrit change
+  information (page URL, change-id, commit SHA, or stream event JSON), it uses
+  gerrit-api skill to fetch the patch and diffs, performs code review per
+  T2MCodingRule, and posts results back to Gerrit via gerrit-api. No event
+  listener or cron job — triggered on demand.
 dependencies:
-  - T2MCodingRule
-  - gerrit-api (recommended, optional)
+  - gerrit-api     (required — all Gerrit operations)
+  - T2MCodingRule  (required — review standards)
+  - skill-guide    (recommended — path and environment guidance)
 compatibility: Requires python3 (≥3.9). Python stdlib only — no pip needed.
 keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
 ---
 
 # Code Review Skill
 
-**功能：** 按需 Code Review。当 agent 收到 Gerrit 提交相关信息时，自动获取 patch，按 T2Mobile 编码规范审查，生成报告，并可发布回 Gerrit。
+**功能：** 按需 Code Review。收到 Gerrit 变更信息时，通过 **gerrit-api** skill 获取 patch，按 **T2MCodingRule** 审查，生成报告，并可发布回 Gerrit。
 
 **触发条件（收到以下任意内容时使用本 skill）：**
 - Gerrit 变更页面链接（`http://...` 或 `https://...`）
-- Gerrit change number（纯数字，如 `12345`）
-- Gerrit Change-Id（`I` + 40位十六进制，如 `Iabcdef...`）
-- Commit SHA（7~40位十六进制）
-- Gerrit stream event JSON 文本（来自其他 agent 传入）
+- Change number（纯数字，如 `12345`）
+- Change-Id（`I` + 40 位十六进制，如 `Iabcdef...`，正则：`^I[0-9a-f]{40}$`）
+- Commit SHA（7~40 位十六进制，正则：`^[0-9a-f]{7,40}$`）
+- Gerrit stream event JSON 文本
 
-**脚本（Python stdlib，无需 pip）：**
+**所有 Gerrit 操作均通过 gerrit-api skill 完成，本 skill 不直接调用 Gerrit API。**
 
 | 脚本 | 用途 | 调用时机 |
 |---|---|---|
-| `check_env.py` | 环境 & 依赖检查，输出 ✅/❌ | 加载 skill 后运行一次 |
-| `fetch_patch.py` | 解析输入 → 调用 Gerrit REST → 返回 patch JSON | 每次 review 前调用 |
-| `post_result.py` | 提交 review 结果到 Gerrit | LLM 完成审查后调用 |
+| `check_env.py` | 检查 gerrit-api 已安装 + code-review 配置存在 | 加载 skill 后运行一次 |
 
 ---
 
@@ -40,8 +39,10 @@ keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
 > `npx skills add https://github.com/vancebs/skills --skill skill-guide`
 
 ```bash
-# Linux / macOS / Git Bash
+# Linux / macOS
 export SKILL_WORKSPACE="$(pwd)"
+
+# 设置 code-review skill 目录
 export SKILL_DIR=$(python3 -c "
 import os, sys
 from pathlib import Path
@@ -51,18 +52,39 @@ for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
     if p.is_dir():
         print(p); sys.exit(0)
 sys.exit(1)
-") || echo "ERROR: skill not found — npx skills add https://github.com/vancebs/skills --skill code-review"
+") || echo "ERROR: code-review skill not found — npx skills add https://github.com/vancebs/skills --skill code-review"
+
+# 设置 gerrit-api skill 目录（独立变量，避免与 SKILL_DIR 冲突）
+export GERRIT_API_SKILL_DIR=$(python3 -c "
+import os, sys
+from pathlib import Path
+name = 'gerrit-api'
+ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
+    if p.is_dir():
+        print(p); sys.exit(0)
+sys.exit(1)
+") || echo "ERROR: gerrit-api skill not found — npx skills add https://github.com/vancebs/skills --skill gerrit-api"
 ```
 
 ```powershell
 # Windows PowerShell
 $env:SKILL_WORKSPACE = (Get-Location).Path
-$skillName = 'code-review'
+
+# 设置 code-review skill 目录
 $env:SKILL_DIR = @(
-    "$env:SKILL_WORKSPACE\.agents\skills\$skillName",
-    "$HOME\.agents\skills\$skillName"
+    "$env:SKILL_WORKSPACE\.agents\skills\code-review",
+    "$HOME\.agents\skills\code-review"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $env:SKILL_DIR) { Write-Error "Skill '$skillName' not found" }
+
+# 设置 gerrit-api skill 目录
+$env:GERRIT_API_SKILL_DIR = @(
+    "$env:SKILL_WORKSPACE\.agents\skills\gerrit-api",
+    "$HOME\.agents\skills\gerrit-api"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $env:GERRIT_API_SKILL_DIR) {
+    Write-Warning "gerrit-api not found. Install: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
+}
 ```
 
 ---
@@ -77,11 +99,24 @@ python3 "$SKILL_DIR/scripts/check_env.py"
 python "%SKILL_DIR%\scripts\check_env.py"
 ```
 
-**所有项显示 ✅ 后继续。** 按输出提示逐一解决 ❌ 项。
+脚本检查：Python 版本、gerrit-api 已安装、GERRIT_API_SKILL_DIR 已设置、code-review 配置文件存在。
+
+**如果 gerrit-api 未安装，脚本会输出安装命令：**
+```
+❌ gerrit-api skill 未安装（必须安装）
+   安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api
+```
+
+安装后，运行 gerrit-api 的环境检查（配置 Gerrit 连接）：
+```bash
+python3 "$GERRIT_API_SKILL_DIR/scripts/check_env.py"
+```
 
 ---
 
-## Step 2 — 创建配置文件（一次性）
+## Step 2 — 创建 code-review 配置文件（一次性）
+
+> ⚠️ **Gerrit 连接配置（host/username/password）在 gerrit-api skill 中管理，不在此处配置。**
 
 ```bash
 # Linux / macOS
@@ -97,26 +132,12 @@ Copy-Item "$env:SKILL_DIR\scripts\config.json.example" `
           "$env:SKILL_WORKSPACE\config\code-review\code_review_config.json"
 ```
 
-```batch
-:: Windows CMD
-mkdir "%SKILL_WORKSPACE%\config\code-review"
-copy "%SKILL_DIR%\scripts\config.json.example" ^
-     "%SKILL_WORKSPACE%\config\code-review\code_review_config.json"
-```
-
-用编辑器打开配置文件并填写真实值：
+配置文件内容：
 
 | 字段 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `url` | ✅ | — | Gerrit 地址，如 `https://gerrit.example.com` |
-| `username` | ✅ | — | Gerrit 用户名 |
-| `password` | ✅ | — | HTTP Credentials token<br>生成：Gerrit → Settings → HTTP Credentials → Generate Password |
-| `test_mode` | ❌ | `true` | `true` = 仅打印报告，不写 Gerrit；`false` = 发布到 Gerrit |
-| `skip_file_patterns` | ❌ | `[]` | 跳过的文件 glob，如 `["*.md", "*.xml"]` |
-
-> ⚠️ 将配置文件加入 `.gitignore`：`config/code-review/code_review_config.json`
-
-重新运行 `check_env.py` 确认所有项 ✅ 后继续。
+| `test_mode` | ❌ | `true` | `true` = 仅打印报告，不写 Gerrit；`false` = 发布 comment + Verified 标签 |
+| `skip_file_patterns` | ❌ | `[]` | 跳过的文件 glob，如 `["*.md", "*.xml", "*.json"]` |
 
 ---
 
@@ -124,120 +145,124 @@ copy "%SKILL_DIR%\scripts\config.json.example" ^
 
 ```mermaid
 flowchart TD
-    A([收到 Gerrit 信息]) --> B{识别输入类型}
-    B -- URL --> C[运行 fetch_patch.py --url]
-    B -- change-id / number --> D[运行 fetch_patch.py --change-id]
-    B -- commit SHA --> E[运行 fetch_patch.py --commit-id]
-    B -- stream event JSON --> F[运行 fetch_patch.py --event-json]
-    C & D & E & F --> G{fetch 结果}
-    G -- status=error --> H[输出错误，停止]
-    G -- status=ok --> I[解析 JSON，获取 files 数组]
-    I --> J[加载 T2MCodingRule skill]
-    J --> K[逐文件审查 diff]
-    K --> L[生成报告]
-    L --> M{test_mode?}
-    M -- true --> N[打印报告到当前会话]
-    M -- false --> O[运行 post_result.py 提交到 Gerrit]
-    N --> P([结束])
-    O --> P
+    A([收到 Gerrit 变更信息]) --> B[Step 1: 解析输入，提取 change_number]
+    B --> C{能识别类型?}
+    C -- 否 --> D[提示用户提供 change number 或 URL]
+    C -- 是 --> E[Step 2: 用 gerrit-api 获取变更详情]
+    E --> F[Step 3: 用 gerrit-api 列出文件]
+    F --> G[Step 4: 用 gerrit-api 逐文件获取 diff]
+    G --> H[Step 5: 加载 T2MCodingRule，审查 diff]
+    H --> I[Step 6: 生成报告]
+    I --> J{test_mode?}
+    J -- true --> K[打印报告到当前会话]
+    J -- false --> L[Step 7: 用 gerrit-api 发布 review]
+    K & L --> M([结束])
 ```
 
 ---
 
-### 阶段一 — 获取 Patch 数据
+### 阶段一 — 解析输入，提取 change_number
 
-根据收到的信息类型，运行对应命令：
+根据收到的信息类型，提取 `change_number`（Gerrit 变更的数字 ID）：
+
+| 输入类型 | 提取方法 |
+|---|---|
+| Gerrit 页面 URL | 从 URL 中提取数字：`/c/proj/+/NUMBER` 或 `#/c/NUMBER` |
+| 纯数字 | 直接使用，格式正则：`^\d+$` |
+| Change-Id | 格式正则：`^I[0-9a-f]{40}$`，需通过 query 命令查找对应 change number（见下方） |
+| Commit SHA | 格式正则：`^[0-9a-f]{7,40}$`，需通过 query 命令查找（见下方） |
+| Stream event JSON | 读取 `change.number` 字段；`patchSet.revision` 字段为 commit SHA |
+
+**URL 提取示例：**
+```
+https://gerrit.example.com/c/platform/frameworks/base/+/12345      → 12345
+https://gerrit.example.com/c/platform/frameworks/base/+/12345/2    → 12345（patchset 2）
+https://gerrit.example.com/#/c/12345/                              → 12345
+```
+
+**通过 Change-Id 查询 change number：**
+```bash
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+  query "change:Iabcdef1234567890abcdef1234567890abcdef12+limit:1"
+```
+
+**通过 commit SHA 查询 change number：**
+```bash
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+  query "commit:abc123def456+limit:1"
+```
+
+---
+
+### 阶段二 — 通过 gerrit-api 获取 Patch 数据
+
+以下命令全部使用 `GERRIT_API_SKILL_DIR`（不是 `SKILL_DIR`）。
+
+#### 2A — 获取变更详情
 
 ```bash
-# 输入类型 A：Gerrit 变更页面 URL
-python3 "$SKILL_DIR/scripts/fetch_patch.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --url "https://gerrit.example.com/c/project/+/12345"
-
-# 输入类型 B：change number（纯数字）
-python3 "$SKILL_DIR/scripts/fetch_patch.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --change-id 12345
-
-# 输入类型 C：Change-Id（I + 40 位十六进制）
-# 格式正则: ^I[0-9a-f]{40}$
-python3 "$SKILL_DIR/scripts/fetch_patch.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --change-id Iabcdef1234567890abcdef1234567890abcdef12
-
-# 输入类型 D：commit SHA
-# 格式正则: ^[0-9a-f]{7,40}$
-python3 "$SKILL_DIR/scripts/fetch_patch.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --commit-id abc123def456
-
-# 输入类型 E：stream event JSON 文本
-python3 "$SKILL_DIR/scripts/fetch_patch.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --event-json '{"type":"patchset-created","change":{"number":12345,...},...}'
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" get-change <change_number>
 ```
 
-**Windows 将 `python3` 替换为 `python`，路径分隔符用 `\`：**
+**从输出中提取：**
+- `subject` — 提交标题
+- `project` — 项目名
+- `branch` — 目标分支
+- `owner.username` 或 `owner.name` — 提交者
+- `current_revision` — 当前 patchset 的 commit SHA（后续步骤需要）
+
+#### 2B — 列出变更文件
+
+```bash
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" list-files <change_number>
+```
+
+输出为文件路径列表。跳过以下文件（对应 `skip_file_patterns` 配置）：
+- 配置文件（如 `*.json`, `*.xml`, `*.yaml`）按 `skip_file_patterns` 跳过
+
+#### 2C — 获取每个文件的 Diff
+
+对 `list-files` 返回的每个文件路径执行：
+
+```bash
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+  get-diff <change_number> "path/to/file.java"
+```
+
+**Windows 将 `python3` 替换为 `python`，路径分隔符用 `%`：**
 ```batch
-python "%SKILL_DIR%\scripts\fetch_patch.py" --workspace "%SKILL_WORKSPACE%" --change-id 12345
+python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" get-diff <change_number> "path/to/file.java"
 ```
 
-**输出 JSON 结构：**
-
-```json
-{
-  "status":          "ok",
-  "change_number":   12345,
-  "change_id":       "Iabcdef...40hex",
-  "revision":        "abc123...40hex",
-  "patchset_number": 1,
-  "project":         "org/repo",
-  "branch":          "main",
-  "subject":         "Fix login bug",
-  "uploader":        "john.doe",
-  "commit_message":  "Fix login bug\n\nChange-Id: I...",
-  "files": [
-    {
-      "path":   "src/main/java/Foo.java",
-      "status": "MODIFIED",
-      "diff":   "--- a/src/...\n+++ b/src/..."
-    }
-  ]
-}
-```
-
-**判断下一步：**
-- `status == "error"` → 输出 stderr 中的错误信息，停止本次执行
-- `status == "ok"`, `files` 为空 → 输出"无文件变更，跳过审查"
-- `status == "ok"`, `files` 非空 → 进入 Code Review（阶段二）
+收集所有文件的 diff 后，进入阶段三。
 
 ---
 
-### 阶段二 — Code Review
+### 阶段三 — Code Review（对所有收集到的 diff）
 
 加载 **T2MCodingRule** skill，按以下步骤审查。
 
 #### Checklist: 审查前准备
 
-- [ ] `fetch_patch.py` 输出 `status == "ok"`
-- [ ] `files` 数组非空
+- [ ] `get-change` 已成功，已知 `subject`、`project`、`branch`、`current_revision`
+- [ ] `list-files` 已返回文件列表（过滤掉 `skip_file_patterns` 中的文件）
+- [ ] 所有文件的 `get-diff` 已完成
 - [ ] T2MCodingRule skill 已加载
-- [ ] 已知 `change_number` 和 `revision`（后续提交需要）
 
-#### 2A — 提交信息（Commit Message）审查
+#### 3A — 提交信息（Commit Message）审查
 
-检查 `commit_message` 字段：
+检查 `get-change` 返回的 `subject` 和 commit message：
 
-| 检查项 | 正则/规则 | 问题级别 |
+| 检查项 | 正则 / 规则 | 问题级别 |
 |---|---|---|
 | 格式：`type(scope): subject` | `^(feat\|fix\|refactor\|docs\|test\|chore\|style\|perf)(\(.+\))?: .+` | 🟠 ERROR |
-| subject 长度 ≤ 50 字符 | subject 部分（首行冒号后）字符数 | 🟡 WARNING |
-| 不以句号结尾 | subject 末尾不为 `[.。]` | 🟡 WARNING |
-| 包含 Jira ID（如存在）| `Issue: [A-Z]+-\d+` | 🔵 INFO |
+| subject 长度 ≤ 50 字符 | 首行冒号后的文本长度 | 🟡 WARNING |
+| 不以句号结尾 | 末尾不为 `[.。]` | 🟡 WARNING |
+| 包含 Jira ID | `Issue: [A-Z]+-\d+` | 🔵 INFO |
 
-#### 2B — 文件 Diff 审查
+#### 3B — 文件 Diff 审查
 
-对 `files` 数组中每个文件，根据扩展名选择对应规范：
+**只审查 diff 中新增/修改的行（`+` 开头的行）**，根据扩展名选择规范：
 
 | 扩展名 | 规范 |
 |---|---|
@@ -246,26 +271,25 @@ python "%SKILL_DIR%\scripts\fetch_patch.py" --workspace "%SKILL_WORKSPACE%" --ch
 | `.cpp`, `.cc`, `.hpp` | T2MCodingRule 六（C++ 编码规范）|
 | 其他 | 通用质量检查 |
 
-审查重点（仅审查 diff 中新增/修改的行，即 `+` 开头的行）：
-
+审查重点：
 - [ ] 命名规范（类/变量/函数）
 - [ ] 注释完整性（公共 API、复杂逻辑）
 - [ ] 安全规范（T2MCodingRule 七）：无硬编码密码、日志无敏感信息
 - [ ] 兼容性规范（T2MCodingRule 八）：无废弃 API、接口向后兼容
 - [ ] 逻辑错误、资源泄漏、死锁风险
 
-#### 2C — 问题定级
+#### 3C — 问题定级与 PASS/FAIL 判断
 
-| 级别 | 说明 | 对最终结果影响 |
+| 级别 | 说明 | 影响结果 |
 |---|---|---|
 | 🔴 CRITICAL | 编译错误、安全漏洞、严重数据风险 | 导致 FAIL |
 | 🟠 ERROR | 违反 T2MCodingRule 强制规则 | 导致 FAIL |
 | 🟡 WARNING | 建议改进、风格问题 | 不影响 PASS/FAIL |
 | 🔵 INFO | 可选建议 | 不影响 PASS/FAIL |
 
-**判断 PASS / FAIL：** 有任意 🔴 或 🟠 → **FAIL**，否则 **PASS**。
+**判断：** 有任意 🔴 或 🟠 → **FAIL**，否则 **PASS**。
 
-#### 2D — 生成报告（固定格式）
+#### 3D — 生成报告（固定格式）
 
 ```
 ============================
@@ -273,7 +297,7 @@ Code Review 报告
 ============================
 变更：#{change_number} — {subject}
 项目：{project}  分支：{branch}
-Patchset：{patchset_number}  提交人：{uploader}
+提交人：{uploader}
 审查结果：【PASS】 或 【FAIL】
 ============================
 
@@ -282,7 +306,7 @@ Patchset：{patchset_number}  提交人：{uploader}
 
 ## 文件审查
 
-### {file_path} ({status})
+### {file_path}
 [{级别}] 行 {line}: {问题描述}
 → 原因：{违反的规范条目}
 → 建议：{具体修改建议}
@@ -296,46 +320,65 @@ Patchset：{patchset_number}  提交人：{uploader}
 
 ---
 
-### 阶段三 — 提交结果
+### 阶段四 — 发布结果
+
+读取 code-review 配置文件中的 `test_mode` 值（默认 `true`）：
+
+#### 4A — test_mode = true（默认）
+
+直接将报告打印到当前会话，**不操作 Gerrit**。
+
+#### 4B — test_mode = false
+
+用 gerrit-api 发布 review comment 并设置 Verified 标签：
 
 ```bash
-# 方式一：报告内容较短时，直接内联
-python3 "$SKILL_DIR/scripts/post_result.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --change-id {change_number} \
-  --revision  {revision} \
-  --result    {PASS 或 FAIL} \
-  --report    "{报告文本}"
+# PASS：Verified=0，发布 comment
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+  review <change_number> current \
+  '{"message": "<报告文本>", "labels": {"Verified": 0}, "tag": "code-review-agent"}'
 
-# 方式二：报告较长时，先写文件再传入（推荐）
-# Linux / macOS
-cat > /tmp/cr_report.txt << 'REPORT'
-{报告内容}
-REPORT
-python3 "$SKILL_DIR/scripts/post_result.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --change-id {change_number} \
-  --revision  {revision} \
-  --result    {PASS 或 FAIL} \
-  --report-file /tmp/cr_report.txt
-
-# Windows PowerShell（将报告保存为文件再传入）
-$report | Out-File -Encoding utf8 "$env:TEMP\cr_report.txt"
-python "$env:SKILL_DIR\scripts\post_result.py" `
-  --workspace "$env:SKILL_WORKSPACE" `
-  --change-id {change_number} `
-  --revision  {revision} `
-  --result    {PASS 或 FAIL} `
-  --report-file "$env:TEMP\cr_report.txt"
+# FAIL：Verified=-1，发布 comment
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+  review <change_number> current \
+  '{"message": "<报告文本>", "labels": {"Verified": -1}, "tag": "code-review-agent"}'
 ```
 
-**退出码说明：**
+**报告文本较长时（推荐），先写文件再传入：**
+
+```bash
+# 将报告写入临时文件
+python3 -c "
+import sys, json
+report = '''
+{报告文本}
+'''.strip()
+print(json.dumps({'message': report, 'labels': {'Verified': 0}, 'tag': 'code-review-agent'}))
+" > /tmp/review_body.json
+
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+  review <change_number> current "$(cat /tmp/review_body.json)"
+```
+
+```powershell
+# Windows PowerShell
+$body = @{
+    message = @"
+{报告文本}
+"@
+    labels  = @{ Verified = 0 }
+    tag     = "code-review-agent"
+} | ConvertTo-Json -Compress
+
+python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" review <change_number> current $body
+```
+
+**gerrit-api review 命令退出码：**
 
 | 退出码 | 含义 | 后续动作 |
 |---|---|---|
-| `0` | 成功（已提交到 Gerrit） | 完成 |
-| `1` | 提交失败 | 查看 stderr，修复后重试 |
-| `2` | test_mode 激活，未提交 | 将 `test_mode` 改为 `false` 或加 `--force` |
+| `0` | 成功提交到 Gerrit | 完成 |
+| 非 0 | 提交失败（详见 stderr）| 检查权限或网络 |
 
 ---
 
@@ -343,18 +386,20 @@ python "$env:SKILL_DIR\scripts\post_result.py" `
 
 | 异常情况 | 触发条件 | 处理动作 |
 |---|---|---|
-| `fetch_patch.py` 输出 `status=error` | Gerrit 连接失败或找不到变更 | 查看 stderr，检查 config 和网络 |
-| `无法从 URL 中解析 change number` | URL 格式不符 | 改用 `--change-id` 传入纯数字 |
-| `HTTP 401` | password 配置错误 | 重新生成 HTTP Credentials |
-| `HTTP 403` | 账号无 Verified 权限 | 联系 Gerrit 管理员授权 |
-| SSL 错误 | 自签名证书 | 脚本自动重试（禁用 SSL 验证） |
-| `files` 为空 | 纯文档/配置变更 | 输出"无代码文件，跳过审查" |
+| gerrit-api 未安装 | `check_env.py` 输出 ❌ | 运行安装命令后重新检查 |
+| GERRIT_API_SKILL_DIR 未设置 | 调用 gerrit_api.py 报错 | 重新执行 Step 0 |
+| `get-change` 返回空或错误 | change_number 不存在 | 确认 change_number 正确 |
+| `list-files` 返回空 | 纯文档变更 | 输出"无代码文件，跳过审查" |
+| `get-diff` 失败 | 文件已删除或 revision 不对 | 跳过该文件，继续其他文件 |
+| `query` 无结果 | Change-Id 或 commit SHA 不存在 | 提示用户确认信息来源 |
+| `review` 返回 HTTP 401 | gerrit-api password 配置错误 | 运行 `gerrit-api` 的 check_env.py 重新配置 |
+| `review` 返回 HTTP 403 | 账号无 Verified 权限 | 联系 Gerrit 管理员授权 |
 
 ---
 
 ## 配置参考
 
-### 配置文件搜索路径（优先级从高到低）
+### code-review 配置文件搜索路径（优先级从高到低）
 
 | 优先级 | 路径 |
 |---|---|
@@ -366,16 +411,18 @@ python "$env:SKILL_DIR\scripts\post_result.py" `
 | 6 | `$HOME/.config/code_review_config.json` |
 | 7 | `$HOME/code_review_config.json` |
 
+> Gerrit 连接配置（host/username/password）在 **gerrit-api** skill 的配置文件中管理。
+
 ---
 
 ## 与其他 skill 的关系
 
 | Skill | 关系 | 说明 |
 |---|---|---|
-| `gerrit-api` | 推荐安装 | 提供更多 Gerrit 操作能力；`fetch_patch.py` 自身已内置必要 REST 调用 |
-| `T2MCodingRule` | 必须加载 | 提供审查规范（阶段二依赖） |
-| `agent-code-review` | 互补 | `agent-code-review` 自带事件轮询；本 skill 专注按需审查 |
-| `skill-guide` | 建议安装 | 解决路径和 SKILL_DIR 相关问题 |
+| `gerrit-api` | **必须** | 所有 Gerrit 操作（get-change/list-files/get-diff/review）均通过它完成 |
+| `T2MCodingRule` | **必须** | 提供审查规范 |
+| `agent-code-review` | 互补 | `agent-code-review` 自带轮询；本 skill 专注按需单次审查 |
+| `skill-guide` | 建议安装 | 解决 SKILL_DIR/GERRIT_API_SKILL_DIR 路径问题 |
 
 ---
 
@@ -386,8 +433,6 @@ code-review/
 ├── SKILL.md
 ├── README.md
 └── scripts/
-    ├── check_env.py          ← 环境检查（首次运行）
-    ├── fetch_patch.py        ← 获取 patch 数据（每次 review 前运行）
-    ├── post_result.py        ← 提交 review 结果到 Gerrit
-    └── config.json.example  ← 配置模板
+    ├── check_env.py          ← 环境检查（验证 gerrit-api 已安装）
+    └── config.json.example  ← 审查行为配置模板（无 Gerrit 连接配置）
 ```
