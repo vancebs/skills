@@ -1,0 +1,12 @@
+{
+  "_comment": "code-review skill 配置文件。复制本文件，删除 _comment 和 _section_* 字段，填写真实值。",
+
+  "_section_gerrit": "── Gerrit 连接配置 ──────────────────────────────────",
+  "url":      "https://gerrit.example.com",
+  "username": "john.doe",
+  "password": "your-http-credentials-token",
+
+  "_section_review": "── 审查行为配置 ──────────────────────────────────────",
+  "test_mode":          true,
+  "skip_file_patterns": []
+}
