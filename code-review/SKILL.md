@@ -253,19 +253,19 @@ python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" get-diff <change_number> "
 
 依据 **T2MCodingRule 一、Git Commit Message 规范**逐条检查：
 
-| 编号 | 检查项 | 正则 / 规则 | 问题级别 |
-|---|---|---|---|
-| CM-1 | 首行格式：`<Issue Key> <Summary>` | 首行必须匹配 `^\S+\s+\S+.*`，即 Issue Key + 空格 + Summary | 🟠 ERROR |
-| CM-2 | Issue Key 格式 | `^\[?[A-Z0-9]+-\d+\]?` | 🟡 WARNING |
-| CM-3 | 首行与正文之间有空行 | 第 2 行须为空行（如有正文） | 🟠 ERROR |
-| CM-4 | 包含 `* Root Cause` 字段 | 正文中存在 `^\* Root Cause` | 🟠 ERROR |
-| CM-5 | 包含 `* Solution` 字段 | 正文中存在 `^\* Solution` | 🟠 ERROR |
-| CM-6 | 包含 `* Test Steps` 字段 | 正文中存在 `^\* Test Steps` | 🟠 ERROR |
-| CM-7 | 包含 `* Test Result` 字段 | 正文中存在 `^\* Test Result` | 🟠 ERROR |
-| CM-8 | `* Solution` 描述具体技术改动 | 内容不得为泛化表述（如 "Fix code"、"代码优化"、"按要求修改"）；正则排除：`(?i)(fix code\|代码优化\|按.*要求\|meet.*requirement)` | 🟠 ERROR |
-| CM-9 | 涉及安全变更时有 `* Security Check` 字段 | 若 diff 含安全相关改动，需检查是否包含 `^\* Security Check` | 🟡 WARNING |
-| CM-10 | 涉及兼容性变更时有 `* Compatibility Check` 字段 | 若 diff 含接口/API 改动，需检查是否包含 `^\* Compatibility Check` | 🟡 WARNING |
-| CM-11 | 涉及 AOSP 框架/系统服务/架构变更时引用 ADR | commit message 中包含 ADR 文档引用 | 🔵 INFO |
+| 编号    | 检查项                                  | 正则 / 规则                                                                                      | 问题级别       |
+| ----- | ------------------------------------ | -------------------------------------------------------------------------------------------- | ---------- |
+| CM-1  | 首行格式：`<Issue Key> <Summary>`         | 首行必须匹配 `^\S+\s+\S+.*`，即 Issue Key + 空格 + Summary                                             | 🟠 ERROR   |
+| CM-2  | Issue Key 格式                         | `^\[?[A-Z0-9]+-\d+\]?`                                                                       | 🟡 WARNING |
+| CM-3  | 首行与正文之间有空行                           | 第 2 行须为空行（如有正文）                                                                              | 🟠 ERROR   |
+| CM-4  | 包含 `* Root Cause` 字段                 | 正文中存在 `^\* Root Cause`                                                                       | 🟠 ERROR   |
+| CM-5  | 包含 `* Solution` 字段                   | 正文中存在 `^\* Solution`                                                                         | 🟠 ERROR   |
+| CM-6  | 包含 `* Test Steps` 字段                 | 正文中存在 `^\* Test Steps`                                                                       | 🟠 ERROR   |
+| CM-7  | 包含 `* Test Result` 字段                | 正文中存在 `^\* Test Result`                                                                      | 🟠 ERROR   |
+| CM-8  | `* Solution` 描述具体技术改动                | 内容不得为泛化表述（如 "Fix code"、"代码优化"、"按要求修改"）；正则排除：`(?i)(fix code\|代码优化\|按.*要求\|meet.*requirement)` | 🟠 ERROR   |
+| CM-9  | 涉及安全变更时有 `* Security Check` 字段       | 若 diff 含安全相关改动，需检查是否包含 `^\* Security Check`                                                  | 🟡 WARNING |
+| CM-10 | 涉及兼容性变更时有 `* Compatibility Check` 字段 | 若 diff 含接口/API 改动，需检查是否包含 `^\* Compatibility Check`                                          | 🟡 WARNING |
+| CM-11 | 涉及 AOSP 框架/系统服务/架构变更时引用 ADR          | commit message 中包含 ADR 文档引用                                                                  | 🔵 INFO    |
 
 > **注意：** `get-change` 返回的 `subject` 字段仅为首行。如需检查完整 commit message，可在报告中注明"无法获取完整 message"并仅基于 subject 审查 CM-1 ~ CM-3。
 
