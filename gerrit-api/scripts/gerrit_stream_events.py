@@ -107,11 +107,31 @@ import signal
 import subprocess
 import sys
 import time
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _ssl_noverify_context() -> ssl.SSLContext:
+    """Return an SSL context that skips certificate verification."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _is_ssl_error(exc: Exception) -> bool:
+    """Return True if the exception is SSL-related."""
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, ssl.SSLError):
+        return True
+    if isinstance(exc, ssl.SSLError):
+        return True
+    msg = str(exc).lower()
+    return "ssl" in msg or "certificate" in msg
 
 # Module-level logger — configured in _setup_logging() before first use.
 log = logging.getLogger("gerrit_stream_events")
@@ -534,6 +554,9 @@ def send_event_to_hook(
 
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     last_error = "unknown error"
+    # After an SSL error on the first attempt, retry subsequent attempts with
+    # SSL verification disabled.
+    _ssl_ctx: ssl.SSLContext | None = None
 
     for attempt in range(retries + 1):
         if attempt > 0:
@@ -544,7 +567,7 @@ def send_event_to_hook(
             time.sleep(delay)
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx) as resp:
                 status = resp.status
                 if 200 <= status < 300:
                     log.debug("Hook POST succeeded (HTTP %d)", status)
@@ -559,6 +582,11 @@ def send_event_to_hook(
                 return
             last_error = f"HTTP {exc.code}"
         except Exception as exc:  # noqa: BLE001
+            if _is_ssl_error(exc) and _ssl_ctx is None:
+                log.warning(
+                    "Hook POST SSL verification failed; retrying with SSL verification disabled."
+                )
+                _ssl_ctx = _ssl_noverify_context()
             last_error = type(exc).__name__
 
     log.error("Hook failed after %d retries (%s); appended to outbox", retries, last_error)

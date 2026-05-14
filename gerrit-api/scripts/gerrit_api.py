@@ -39,11 +39,32 @@ Commands:
 import base64
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from pathlib import Path
+
+
+def _ssl_noverify_context() -> ssl.SSLContext:
+    """Return an SSL context that skips certificate verification."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _is_ssl_error(exc: Exception) -> bool:
+    """Return True if the exception is SSL-related."""
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, ssl.SSLError):
+        return True
+    if isinstance(exc, ssl.SSLError):
+        return True
+    msg = str(exc).lower()
+    return "ssl" in msg or "certificate" in msg
 
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -168,7 +189,11 @@ def _strip_xssi(body: str) -> str:
 
 def _http(method: str, url: str, username: str, password: str,
           body: dict | None = None) -> str:
-    """Perform an authenticated HTTP request; return raw response body."""
+    """Perform an authenticated HTTP request; return raw response body.
+
+    On SSL verification failure, automatically retries once with SSL
+    verification disabled and emits a warning.
+    """
     headers = {"Authorization": _auth_header(username, password)}
     data: bytes | None = None
     if body is not None:
@@ -176,27 +201,63 @@ def _http(method: str, url: str, username: str, password: str,
         headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req) as resp:
+
+    def _do_request(ctx=None):
+        with urllib.request.urlopen(req, context=ctx) as resp:
             return resp.read().decode("utf-8", errors="replace")
+
+    try:
+        return _do_request()
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         _die(f"HTTP {e.code} {e.reason}\n{detail}")
     except urllib.error.URLError as e:
+        if _is_ssl_error(e):
+            warnings.warn(
+                f"SSL verification failed for {url}; retrying with SSL verification disabled.",
+                stacklevel=2,
+            )
+            try:
+                return _do_request(ctx=_ssl_noverify_context())
+            except urllib.error.HTTPError as e2:
+                detail = e2.read().decode("utf-8", errors="replace")
+                _die(f"HTTP {e2.code} {e2.reason}\n{detail}")
+            except urllib.error.URLError as e2:
+                _die(f"Connection error (SSL disabled): {e2.reason}")
         _die(f"Connection error: {e.reason}")
 
 
 def _http_bytes(url: str, username: str, password: str) -> bytes:
-    """GET raw bytes (used for base64-encoded file content)."""
+    """GET raw bytes (used for base64-encoded file content).
+
+    On SSL verification failure, automatically retries once with SSL
+    verification disabled and emits a warning.
+    """
     headers = {"Authorization": _auth_header(username, password)}
     req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req) as resp:
+
+    def _do_request(ctx=None):
+        with urllib.request.urlopen(req, context=ctx) as resp:
             return resp.read()
+
+    try:
+        return _do_request()
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         _die(f"HTTP {e.code} {e.reason}\n{detail}")
     except urllib.error.URLError as e:
+        if _is_ssl_error(e):
+            warnings.warn(
+                f"SSL verification failed for {url}; retrying with SSL verification disabled.",
+                stacklevel=2,
+            )
+            try:
+                return _do_request(ctx=_ssl_noverify_context())
+            except urllib.error.HTTPError as e2:
+                detail = e2.read().decode("utf-8", errors="replace")
+                _die(f"HTTP {e2.code} {e2.reason}\n{detail}")
+            except urllib.error.URLError as e2:
+                _die(f"Connection error (SSL disabled): {e2.reason}")
         _die(f"Connection error: {e.reason}")
 
 
