@@ -297,6 +297,49 @@ if (Features.isSupport(Features.TCL_FEATURE_YOUR_FEATURE_NAME)) {
 - 保持对**原生代码最小改动**，新文件建议放在 `vendor/t2m/` 仓库
 - 在原生文件中，只修改**插桩点**，调用相关 API
 
+### 1.6 非正常路径处理（Commit Message）
+
+当收到的 commit message 存在以下情况时，按以下规则处理，**不得跳过或自行修改**：
+
+| 情况 | 处理规则 |
+|---|---|
+| commit message 为空 | 所有字段标记 `[🟠 ERROR]`，结果 FAIL |
+| 仅有首行，无正文 | CM-4 ~ CM-7 均标记 `[🟠 ERROR]` |
+| 多个 Issue Key（首行含多个 `[X-123] [Y-456]`）| 取第一个 Issue Key 验证，其余作为 `[🔵 INFO]` 附加信息 |
+| Solution / Test Steps / Test Result 字段存在但内容为空行 | 与"字段缺失"等同，标记 `[🟠 ERROR]` |
+| commit message 使用非英文（如中文）书写 | 不违规；但 Issue Key 格式仍须符合正则 `^\[?[A-Z0-9]+-\d+\]?` |
+| 第三方 / vendor 提交（commit message 不符合 T2Mobile 格式）| 标记 `[🔵 INFO]`："疑似第三方提交，Commit Message 规范不适用，请人工确认" |
+| 已合并（`status: MERGED`）或已废弃（`status: ABANDONED`）的变更 | 仍按规范审查；结论仅供参考（不影响已合入代码） |
+
+---
+
+## ⛔ 约束与禁止事项
+
+### 不支持的场景
+
+| 场景 | 原因 | 处理动作 |
+|---|---|---|
+| 自动修复 commit message | 不在本 skill 职责范围内 | 输出问题和建议，由提交者手动修改 |
+| 生成代码补丁 | 不在本 skill 职责范围内 | 输出问题和建议，不生成代码 |
+| 审查已合并代码的正确性（运行时行为）| 静态审查范围 | 标注"本工具仅做静态代码分析，运行时行为需测试验证" |
+| 无 Gerrit 连接时审查并发布结果 | 依赖 gerrit-api | 若 gerrit-api 不可用，仅输出报告到会话，不发布到 Gerrit |
+
+### 明确禁止的操作
+
+- ⛔ **禁止跳过任何 `[🟠 ERROR]` 或 `[🔴 CRITICAL]` 级别的问题**：必须在报告中列出
+- ⛔ **禁止修改 T2MCodingRule 中的规范内容**（如宽松某条规则以使变更通过）
+- ⛔ **禁止对 generated/auto-generated 代码应用命名规范**：以下情况标记 `[🔵 INFO] 疑似自动生成代码，跳过命名规范检查`：
+  - 文件路径含 `gen/`, `generated/`, `build/`, `out/`
+  - 文件头含 `@generated` 或 `DO NOT EDIT` 注释
+- ⛔ **禁止对 AOSP upstream 原始文件（未经修改）应用 T2Mobile 命名规范**：标记 `[🔵 INFO] 疑似 AOSP 原始文件，请人工确认是否适用 T2Mobile 规范`
+
+### 规则冲突处理
+
+当 T2MCodingRule 与 AOSP / upstream 约束冲突时：
+1. 标注冲突：`[🟡 WARNING] 与 AOSP/upstream 存在规范冲突`
+2. 列出冲突细节
+3. **不自动判定 FAIL**；由人工决策
+
 ---
 
 ## 五、C 编码规范

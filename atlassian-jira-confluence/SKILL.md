@@ -444,6 +444,51 @@ for item in results.get("results", []):
 
 ---
 
+## ⛔ 约束与禁止事项
+
+### 不支持的场景
+
+| 场景 | 原因 | 处理动作 |
+|---|---|---|
+| HTTP 401 Unauthorized | token / 密码错误或已过期 | 终止并提示用户重新生成 API token；**不重试** |
+| HTTP 403 Forbidden | 账号无该操作权限 | 终止并提示用户联系管理员授权；**不重试** |
+| HTTP 404 Not Found | Issue key / page ID / space key 不存在 | 终止当前操作，输出明确错误；不继续依赖该资源的后续步骤 |
+| HTTP 429 Rate Limited | 请求频率超限 | 等待响应头 `Retry-After` 秒数后重试一次；仍失败则终止 |
+| HTTP 5xx Server Error | 服务端故障 | 最多重试 3 次（指数退避 1s/2s/4s），超限后输出错误并终止 |
+| 响应体非 JSON / 解析失败 | 代理层返回 HTML 错误页 | 输出原始响应前 200 字符，提示用户检查 `url` 配置 |
+| 创建页面时父页面不存在 | parent_id 无效 | 先调用 `confluence.get_page_by_id(parent_id)` 验证存在，不存在则停止并提示 |
+| JQL / CQL 语法错误 | 查询字符串格式错误 | 捕获 `ApiError(400)`，输出错误信息，提示用户修正查询语法 |
+| 并发编辑 Confluence 页面（版本冲突） | 另一用户同时编辑 | 捕获 `ApiError(409)`，获取最新版本号后重试一次；仍冲突则停止并提示 |
+| 附件大小超过实例限制（通常 50–250 MB）| 服务端拒绝 | 上传前检查文件大小；超过 50 MB 时提示用户确认服务端限制 |
+
+### 明确禁止的操作
+
+- ⛔ **禁止硬编码 `url`, `username`, `api_token`**：必须从配置文件或环境变量读取
+- ⛔ **禁止将 `.atlassian.json`（含 token 的配置文件）提交到 Git**：必须加入 `.gitignore`
+- ⛔ **禁止在日志/输出中打印 `api_token` 或 `password`**：不论任何错误情况
+- ⛔ **禁止在没有 `.atlassian.json` 或环境变量时静默使用空凭据运行**：必须 exit 1 并提示配置
+- ⛔ **禁止 `delete` 操作不经用户确认**：删除 Jira issue、Confluence page、space 前必须在报告中列明将要删除的内容，等待用户确认
+
+### 边界条件
+
+| 参数 | 范围 | 超限行为 |
+|---|---|---|
+| JQL / CQL `limit` | 1–1000；推荐 ≤ 100 | 超过 1000 → 截断为 1000，记录 WARNING |
+| Confluence page body 大小 | 推荐 < 5 MB | 超过 5 MB → 警告用户，发布可能超时 |
+| 附件文件大小 | ≤ 50 MB（默认实例限制）| 超限前提示用户；不自动分块上传 |
+| JQL 字符串长度 | ≤ 32768 字符 | 超限 → 截断并输出 WARNING |
+
+### 幂等性声明
+
+| 操作 | 幂等性 | 说明 |
+|---|---|---|
+| `jira.issue()`, `confluence.get_page_by_id()` | ✅ 幂等 | 只读操作 |
+| `jira.issue_create()`, `confluence.create_page()` | ❌ 非幂等 | 重复调用会创建重复条目；调用方负责先检查是否存在 |
+| `jira.issue_update()`, `confluence.update_page()` | ⚠️ 非幂等（有版本保护）| 需传入正确版本号（`version.number`）；否则返回 409 |
+| `jira.transition_issue()` | ⚠️ 非幂等（有保护） | Jira 会拒绝已处于目标状态的转换（返回 400） |
+
+---
+
 For the complete API reference with all method signatures, see:
 - `references/jira-operations.md`
 - `references/confluence-operations.md`

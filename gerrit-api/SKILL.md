@@ -520,6 +520,48 @@ Common query operators: `status:open`, `status:merged`, `owner:self`, `reviewer:
 
 ---
 
+## ⛔ 约束与禁止事项
+
+### 不支持的场景
+
+| 场景 | 原因 | 处理动作 |
+|---|---|---|
+| HTTP 5xx 持续失败（超过重试上限） | 服务端不可用 | 最多重试 3 次（指数退避），超限后输出错误并终止，不得无限重试 |
+| HTTP 429 Rate Limited | 请求频率超限 | 等待响应头 `Retry-After` 秒数后重试一次；若仍失败则终止 |
+| 响应体无法解析（非 XSSI 格式或非 JSON） | Gerrit 版本不兼容或代理层返回 HTML | 输出原始响应前 200 字符，提示用户检查 `url` 配置和 Gerrit 版本 |
+| `query` 返回多条结果（Change-Id 或 commit SHA 匹配多个变更） | 不同项目的同名 Change-Id | 只取第一条结果，日志输出 WARNING "多条结果，使用第一条" |
+| `get-change` 对已删除/已废弃变更操作（`status: ABANDONED`） | 变更已关闭 | 获取后检查 `status` 字段；若为 `ABANDONED` 或 `MERGED` 时 `review` 操作不发 Verified 标签，仅发 comment |
+| `events.jsonl` 最后一行无换行符（写入中断） | 写端 crash | 读端跳过不以 `\n` 结尾的最后一行，等待下次写完整行 |
+| 并发多个 `gerrit_stream_events.py` 实例写同一文件 | 文件锁冲突 | 不支持，同一 `events.jsonl` 文件只允许一个写入进程 |
+
+### 明确禁止的操作
+
+- ⛔ **禁止将 `--hook-url` 指向非 loopback 地址（127.0.0.x）而不使用 TLS**：明文传输 token 会导致凭据泄露
+- ⛔ **禁止在日志/stderr 中打印 `password`、`hook_token` 或任何凭据字段**：不论任何异常情况
+- ⛔ **禁止在配置文件中硬编码密码后提交到 Git**：必须将 `config/gerrit-api/gerrit_config.json` 加入 `.gitignore`
+- ⛔ **禁止对同一 change 的同一 patchset 重复提交 `review`**：非幂等操作，会产生重复评论；调用前检查该 patchset 是否已有本账号评论
+
+### 边界条件
+
+| 参数 | 范围 | 超限行为 |
+|---|---|---|
+| `--max-events` | 1–100000；默认不限 | 超过 100000 → 截断为 100000，记录 WARNING |
+| `--hook-retries` | 0–10；默认 3 | 超过 10 → 启动时拒绝，exit 1 |
+| `--hook-timeout` | 1–60 秒；默认 3 | 超过 60 → 截断为 60 |
+| 单条事件 JSON 大小 | 无硬限制；建议 < 1 MB | 超过 1 MB 时记录 WARNING |
+| 文件路径长度 | ≤ 4096 字符 | 超限 → 跳过该文件，记录 WARNING |
+
+### 幂等性声明
+
+| 操作 | 幂等性 | 说明 |
+|---|---|---|
+| `get-change`, `list-files`, `get-diff`, `query` | ✅ 幂等 | 只读，无副作用 |
+| `gerrit_stream_events.py`（写文件） | ⚠️ 非幂等（有保护） | 光标文件防止重复读取 |
+| `review`（post review） | ❌ 非幂等 | 重复调用会发重复评论；调用方负责去重 |
+| `submit`, `abandon`, `restore` | ⚠️ 非幂等（有保护） | Gerrit 服务端拒绝对已完成状态重复操作（HTTP 409） |
+
+---
+
 ## Security
 
 - **Never print or log** `GERRIT_HTTP_PASSWORD`, `password` config field, or `hook_token`.

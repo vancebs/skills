@@ -381,6 +381,44 @@ python3 "$SKILL_DIR/scripts/post_result.py" \
 
 ---
 
+## ⛔ 约束与禁止事项
+
+### 不支持的场景
+
+| 场景 | 原因 | 处理动作 |
+|---|---|---|
+| `review_job.py` 输出 `status: error` | 脚本内部错误（配置缺失、连接失败等）| 停止本次 cron 执行，将 `message` 字段内容告知用户 |
+| `events_count: 0` 连续出现 ≥ 3 次 | 监听进程可能已停止或无新事件 | 运行 `python3 "$SKILL_DIR/scripts/check_env.py"` 排查；不得将空结果判定为 PASS |
+| `listener_status: start_failed` | SSH 配置错误或密钥未授权 | 停止 cron，提示用户按 Step 1 检查 SSH 配置；不自动重试超过 3 次 |
+| `post_result.py` HTTP 403 持续失败 | 账号无 Verified 投票权限 | 停止执行，不自动重试；提示联系 Gerrit 管理员 |
+| 事件 JSON 结构不符合预期字段 | Gerrit 版本差异或事件类型不同 | 跳过该事件，记录 WARNING，不报 FAIL |
+| diff 获取超时或失败 | 网络不稳定或 Gerrit 临时故障 | 跳过该事件本次审查，等待下次 cron 周期重试（最多 3 次，通过 events.last 光标控制） |
+
+### 明确禁止的操作
+
+- ⛔ **禁止在 `test_mode: false` 时对同一 change+patchset 重复发布 Verified 标签**：会产生重复投票
+- ⛔ **禁止在 `check_env.py` 失败时继续运行主任务**：缺少必要配置时行为不可预期
+- ⛔ **禁止将 `code_review_config.json`（含密码字段）提交到 Git**
+- ⛔ **禁止并发运行多个 `review_job.py` 实例指向同一 `events.jsonl`**：光标文件不支持并发读
+
+### 边界条件
+
+| 参数 / 文件 | 范围 | 超限行为 |
+|---|---|---|
+| `events.jsonl` 单行大小 | 建议 < 1 MB | 超限 → 跳过该行，记录 WARNING |
+| cron 周期 | 最短 1 分钟 | 不支持秒级触发；低于 1 分钟不会增加可靠性 |
+| 单次 cron 审查的最大事件数 | 默认 50（由 review_job.py 控制）| 超限 → 取前 50 个，其余推迟到下次 cron |
+
+### 幂等性声明
+
+| 操作 | 幂等性 | 说明 |
+|---|---|---|
+| `check_env.py` | ✅ 幂等 | 只读检查，可多次运行 |
+| `review_job.py` 读取事件 | ⚠️ 非幂等（有保护）| 光标文件防止重复处理 |
+| `post_result.py` 发布结果 | ❌ 非幂等 | 重复调用会重复发 comment/Verified；由光标保护防止 |
+
+---
+
 ## 安全注意
 
 - `code_review_config.json` 必须加入 `.gitignore`

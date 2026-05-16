@@ -426,6 +426,35 @@ python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" review <change_number> 
 | `review` 返回 HTTP 401 | gerrit-api password 配置错误 | 运行 `gerrit-api` 的 check_env.py 重新配置 |
 | `review` 返回 HTTP 403 | 账号无 Verified 权限 | 联系 Gerrit 管理员授权 |
 
+## ⛔ 约束与禁止事项
+
+### 不支持的场景
+
+| 场景 | 原因 | 处理动作 |
+|---|---|---|
+| 输入无法解析为任何已知类型 | URL 格式非标准、JSON 结构不匹配 | 停止并提示用户提供 change number（纯数字）或标准 Gerrit URL |
+| `query` 返回 0 条结果 | Change-Id / commit SHA 不在此 Gerrit 实例 | 停止并提示"在此 Gerrit 实例中未找到对应变更，请确认信息来源" |
+| `query` 返回多条结果 | 不同项目含相同 Change-Id 的历史提交 | 使用第一条，日志输出 WARNING；若结果超过 5 条则停止并请用户提供 change number |
+| 所有文件被 `skip_file_patterns` 过滤 | 纯文档/配置变更 | 输出"所有文件均被跳过，无可审查代码文件"，**PASS**（不 FAIL） |
+| `get-diff` 对二进制文件或新增文件返回空 | 二进制内容不可 diff | 跳过该文件，报告中标注"[🔵 INFO] 二进制文件，跳过审查" |
+| current_revision 在 `get-change` 和 `review` 之间发生变化（新 patchset 上传） | 时序竞争 | `review` 使用 `current` 关键字（不固定 revision），gerrit-api 自动指向当前最新 patchset |
+| `review` 返回 HTTP 5xx 或网络超时 | gerrit 服务端故障 | 最多重试 2 次，超限后输出错误，**不**标记 Verified |
+| gerrit-api skill 未安装 | 依赖缺失 | 停止并输出：`❌ 需要 gerrit-api skill。安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api` |
+
+### 明确禁止的操作
+
+- ⛔ **禁止在 `current_revision` 未确认时调用 `review`**：必须先执行 `get-change` 获得成功响应
+- ⛔ **禁止对 `status: ABANDONED` 或 `status: MERGED` 的变更设置 Verified 标签**：可发 comment 但不设标签
+- ⛔ **禁止在 test_mode = false 时对同一 change+patchset 重复发布结果**：非幂等，会产生重复评论
+- ⛔ **禁止将 diff 内容（含用户代码）发送到外部服务或第三方 API**
+
+### 幂等性声明
+
+| 操作 | 幂等性 | 说明 |
+|---|---|---|
+| 解析输入 / 获取 patch | ✅ 幂等 | 只读操作 |
+| `review`（发布报告） | ❌ 非幂等 | 每次调用均追加 comment；由 cron/调用方负责去重 |
+
 ---
 
 ## 配置参考
