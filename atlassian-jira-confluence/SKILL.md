@@ -31,19 +31,34 @@ It's safe to run multiple times.
 ### Step 2 — Set Environment Variables
 
 ```bash
-export ATLASSIAN_URL="https://yourcompany.atlassian.net"
-export ATLASSIAN_USERNAME="your@email.com"
-export ATLASSIAN_API_TOKEN="your-api-token"
+# Confluence
+export CONFLUENCE_URL="https://your-confluence.example.com"
+export CONFLUENCE_PAT_TOKEN="your-pat-token"
+export CONFLUENCE_USERNAME="you@example.com"   # Cloud only
+
+# Jira
+export JIRA_URL="https://your-jira.example.com"
+export JIRA_PAT_TOKEN="your-pat-token"
+export JIRA_USERNAME="you@example.com"         # Cloud only
 ```
 
-> **API Token:** Generate at https://id.atlassian.com/manage-profile/security/api-tokens
-> **Note:** `ATLASSIAN_USERNAME` is only required for Atlassian Cloud.
+> **PAT Token:** Personal Access Token. On Atlassian Cloud, generate at https://id.atlassian.com/manage-profile/security/api-tokens (use as password).  
+> **`*_USERNAME`** is only required for Atlassian Cloud (`.atlassian.net`).
+
+Windows CMD:
+```cmd
+set JIRA_URL=https://your-jira.example.com
+set JIRA_PAT_TOKEN=your-pat-token
+set CONFLUENCE_URL=https://your-confluence.example.com
+set CONFLUENCE_PAT_TOKEN=your-pat-token
+```
 
 Windows PowerShell:
 ```powershell
-$env:ATLASSIAN_URL = "https://yourcompany.atlassian.net"
-$env:ATLASSIAN_USERNAME = "your@email.com"
-$env:ATLASSIAN_API_TOKEN = "your-api-token"
+$env:JIRA_URL = "https://your-jira.example.com"
+$env:JIRA_PAT_TOKEN = "your-pat-token"
+$env:CONFLUENCE_URL = "https://your-confluence.example.com"
+$env:CONFLUENCE_PAT_TOKEN = "your-pat-token"
 ```
 
 ### Step 3 — Test the Connection
@@ -150,59 +165,40 @@ Always use this code block so config-file priority is respected automatically.
 
 ```python
 import os
-from pathlib import Path
 from atlassian import Jira, Confluence
 
 
-def load_config() -> dict:
-    """Return credentials from environment variables.
-
-    Required:
-      ATLASSIAN_URL        — base URL
-      ATLASSIAN_API_TOKEN  — API token
-      ATLASSIAN_USERNAME   — account email (Cloud only)
-    """
-    url      = os.environ.get("ATLASSIAN_URL", "").strip().rstrip("/")
-    token    = os.environ.get("ATLASSIAN_API_TOKEN", "").strip()
-    username = os.environ.get("ATLASSIAN_USERNAME", "").strip()
-    if not url:
-        raise RuntimeError("ATLASSIAN_URL is not set")
-    if not token:
-        raise RuntimeError("ATLASSIAN_API_TOKEN is not set")
-    return {"url": url, "token": token, "username": username}
-
-
-def is_cloud(url: str) -> bool:
+def _is_cloud(url: str) -> bool:
     return "atlassian.net" in url
 
 
 def get_jira():
-    cfg = load_config()
-    url      = cfg["url"]
-    token    = cfg["token"]
-    username = cfg.get("username", "")
+    """Return an authenticated Jira client using env vars."""
+    url   = os.environ.get("JIRA_URL", "").strip().rstrip("/")
+    token = os.environ.get("JIRA_PAT_TOKEN", "").strip()
+    user  = os.environ.get("JIRA_USERNAME", "").strip()
     if not url or not token:
         raise EnvironmentError(
             "Jira credentials missing.\n"
-            "  Set ATLASSIAN_URL and ATLASSIAN_API_TOKEN environment variables."
+            "  Set JIRA_URL and JIRA_PAT_TOKEN environment variables."
         )
-    if is_cloud(url):
-        return Jira(url=url, username=username, password=token, cloud=True)
+    if _is_cloud(url):
+        return Jira(url=url, username=user, password=token, cloud=True)
     return Jira(url=url, token=token)
 
 
 def get_confluence():
-    cfg = load_config()
-    url      = cfg["url"]
-    token    = cfg["token"]
-    username = cfg.get("username", "")
+    """Return an authenticated Confluence client using env vars."""
+    url   = os.environ.get("CONFLUENCE_URL", "").strip().rstrip("/")
+    token = os.environ.get("CONFLUENCE_PAT_TOKEN", "").strip()
+    user  = os.environ.get("CONFLUENCE_USERNAME", "").strip()
     if not url or not token:
         raise EnvironmentError(
             "Confluence credentials missing.\n"
-            "  Set ATLASSIAN_URL and ATLASSIAN_API_TOKEN environment variables."
+            "  Set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN environment variables."
         )
-    if is_cloud(url):
-        return Confluence(url=url, username=username, password=token, cloud=True)
+    if _is_cloud(url):
+        return Confluence(url=url, username=user, password=token, cloud=True)
     return Confluence(url=url, token=token)
 ```
 
@@ -214,15 +210,19 @@ def get_confluence():
 
 | Env var | Required | Description |
 |---|---|---|
-| `ATLASSIAN_URL` | ✅ | e.g. `https://yourcompany.atlassian.net` |
-| `ATLASSIAN_USERNAME` | ✅ for Cloud | Atlassian account email |
-| `ATLASSIAN_API_TOKEN` | ✅ | API token (from https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_URL` | ✅ | Jira base URL, e.g. `https://your-jira.example.com` |
+| `JIRA_PAT_TOKEN` | ✅ | Jira Personal Access Token |
+| `JIRA_USERNAME` | Cloud only | Atlassian account email |
+| `CONFLUENCE_URL` | ✅ | Confluence base URL, e.g. `https://your-confluence.example.com` |
+| `CONFLUENCE_PAT_TOKEN` | ✅ | Confluence Personal Access Token |
+| `CONFLUENCE_USERNAME` | Cloud only | Atlassian account email |
 
 Set env vars:
 ```bash
-export ATLASSIAN_URL="https://yourcompany.atlassian.net"
-export ATLASSIAN_USERNAME="your@email.com"
-export ATLASSIAN_API_TOKEN="your-api-token"
+export JIRA_URL="https://your-jira.example.com"
+export JIRA_PAT_TOKEN="your-pat-token"
+export CONFLUENCE_URL="https://your-confluence.example.com"
+export CONFLUENCE_PAT_TOKEN="your-pat-token"
 ```
 
 Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
