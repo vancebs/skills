@@ -344,10 +344,9 @@ After=network.target
 
 [Service]
 # SKILL_WORKSPACE = agent's project dir (for config file & events.jsonl)
-# SKILL_DIR       = gerrit-api skill installation directory
+# Replace /opt/gerrit-workspace and /home/user/.agents/skills/gerrit-api with actual paths
 Environment=SKILL_WORKSPACE=/opt/gerrit-workspace
-Environment=SKILL_DIR=/home/user/.agents/skills/gerrit-api
-ExecStart=/usr/bin/python3 ${SKILL_DIR}/scripts/gerrit_stream_events.py \
+ExecStart=/usr/bin/python3 /home/user/.agents/skills/gerrit-api/scripts/gerrit_stream_events.py \
     --workspace ${SKILL_WORKSPACE} \
     --output ${SKILL_WORKSPACE}/events.jsonl \
     --hook-url http://127.0.0.1:8443/events \

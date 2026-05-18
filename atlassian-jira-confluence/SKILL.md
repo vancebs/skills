@@ -177,15 +177,8 @@ def _workspace() -> Path:
 def _skill_dir() -> Path:
     """Return this skill's installation directory (for own scripts / assets).
 
-    Priority: SKILL_DIR env var (set by platform) > Path(__file__) derivation.
-    This is DISTINCT from _workspace(), which is the agent's project directory.
+    Derives from __file__ location (works when code runs from .agents/skills/atlassian-jira-confluence/).
     """
-    sd = os.environ.get("SKILL_DIR", "").strip()
-    if sd:
-        return Path(sd).resolve()
-    # When this code is copy-pasted into an agent-generated script, __file__
-    # points to that script's location — not the skill dir.  SKILL_DIR env var
-    # is the reliable source; fall back gracefully.
     return Path(__file__).resolve().parent
 
 
