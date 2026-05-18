@@ -6,11 +6,15 @@ description: >
   auto-indexed by OpenClaw. Agents can write knowledge into categorized
   subdirectories and retrieve it via memory_search semantic queries.
   NOT supported on other platforms.
+  Trigger: use kb:// prefix to reference files in the knowledge base,
+  e.g. kb://temp/result.md resolves to $KNOWLEDGE_BASE_DIR/temp/result.md.
 platform: OpenClaw only
 compatibility: >
   ⚠️ 本 skill 仅支持 OpenClaw 平台。非 OpenClaw 环境请勿使用。
   Python 3.9+ required for setup scripts (stdlib only).
-keywords: [knowledge-base, openclaw, memory, shared, markdown, index]
+keywords: [knowledge-base, openclaw, memory, shared, markdown, index, kb://]
+triggers:
+  - "kb://"
 ---
 
 # Claw Knowledge Base Skill
@@ -25,6 +29,88 @@ keywords: [knowledge-base, openclaw, memory, shared, markdown, index]
 |---|---|---|
 | **读取（检索）** | 语义搜索已有知识 | `memory_search "<查询词>"` |
 | **写入（存入）** | 将新知识写入对应目录的 `.md` 文件 | 按文件命名规范创建或更新文件 |
+
+---
+
+## 🔗 `kb://` 路径协议
+
+### 定义
+
+`kb://` 是本 skill 的触发词与路径协议。在任何上下文中出现 `kb://<path>` 时，Agent 应将其解析为知识库中的绝对路径。
+
+**解析规则：**
+
+```
+kb://<path>  →  $KNOWLEDGE_BASE_DIR/<path>
+```
+
+| 示例 | 解析结果 |
+|---|---|
+| `kb://temp/review-result.md` | `$KNOWLEDGE_BASE_DIR/temp/review-result.md` |
+| `kb://architecture/service-layer.md` | `$KNOWLEDGE_BASE_DIR/architecture/service-layer.md` |
+| `kb://code-review-agent/context.md` | `$KNOWLEDGE_BASE_DIR/code-review-agent/context.md` |
+| `kb://` （仅协议头，无路径）| `$KNOWLEDGE_BASE_DIR/`（根目录） |
+
+**路径约束（正则）：** `^kb://([a-z0-9][a-z0-9-]*/)*([a-z0-9][a-z0-9-]*\.md)?$`
+- `<path>` 中只允许小写字母、数字、连字符和 `/`
+- 最多 2 层目录（`category/file.md`），不支持 3 层及以上
+- 文件扩展名必须为 `.md`（若有文件名的话）
+
+### 如何使用 `kb://` 路径
+
+**读取文件：**
+```bash
+# 解析路径后直接读取
+cat "$KNOWLEDGE_BASE_DIR/temp/review-result.md"
+# 等价于
+cat "$(python3 -c "import os; print(os.environ['KNOWLEDGE_BASE_DIR'] + '/temp/review-result.md')")"
+```
+
+**写入文件：**
+```bash
+# kb://temp/my-result.md → $KNOWLEDGE_BASE_DIR/temp/my-result.md
+python3 -c "
+import os
+from pathlib import Path
+kb = Path(os.environ['KNOWLEDGE_BASE_DIR'])
+target = kb / 'temp' / 'my-result.md'
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text('# My Result\n\n内容...', encoding='utf-8')
+print(f'Written: {target}')
+"
+```
+
+**检测 `kb://` 触发词（Python 辅助函数）：**
+```python
+import os, re
+from pathlib import Path
+
+KB_PROTO = re.compile(r'^kb://(.*)$')
+
+def resolve_kb_path(uri: str) -> Path:
+    """解析 kb://<path> 为绝对路径。"""
+    m = KB_PROTO.match(uri)
+    if not m:
+        raise ValueError(f"不是合法的 kb:// URI: {uri!r}")
+    kb_dir = os.environ.get("KNOWLEDGE_BASE_DIR", "")
+    if not kb_dir:
+        raise EnvironmentError("KNOWLEDGE_BASE_DIR 未设置")
+    return Path(kb_dir) / m.group(1)
+
+# 使用示例
+path = resolve_kb_path("kb://temp/review-result.md")
+# → Path("/home/user/project/knowledge-base/temp/review-result.md")
+```
+
+### 非正常路径处理
+
+| 情况 | 处理动作 |
+|---|---|
+| `KNOWLEDGE_BASE_DIR` 未设置 | 停止并提示运行 Step 0 设置环境变量 |
+| `<path>` 包含 `..` 或绝对路径段（路径穿越）| 拒绝解析，输出错误：`kb:// 路径不允许包含 '..' 或绝对路径` |
+| 解析后的文件不存在（读取时）| 输出明确错误：`kb://<path> 文件不存在: <绝对路径>`；不自动创建 |
+| `<path>` 超过 2 层目录深度 | 拒绝操作，输出错误：`kb:// 仅支持最多 2 层目录` |
+| `<path>` 包含非法字符（大写/空格/中文等）| 拒绝操作，输出错误并给出正确格式示例 |
 
 ---
 

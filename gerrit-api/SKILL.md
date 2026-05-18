@@ -38,31 +38,17 @@ $env:SKILL_WORKSPACE = (Get-Location).Path
 ### Step 0B — 确认 Skill 安装目录（SKILL_DIR）
 
 ```bash
-# Linux / macOS — 自动检测并设置 SKILL_DIR
+# Linux / macOS
 export SKILL_DIR=$(python3 -c "
-import os, sys
-from pathlib import Path
-name = 'gerrit-api'
+import os, sys; from pathlib import Path; n='gerrit-api'
 ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
-    if p.is_dir():
-        print(p); sys.exit(0)
-sys.exit(1)
-") || {
-    echo "ERROR: gerrit-api skill not found."
-    echo "Install: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
-}
-
-# Windows PowerShell — 自动检测并设置 SKILL_DIR
-$skillName = 'gerrit-api'
-$env:SKILL_DIR = @(
-    "$env:SKILL_WORKSPACE\.agents\skills\$skillName",
-    "$HOME\.agents\skills\$skillName"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $env:SKILL_DIR) {
-    Write-Error "Skill '$skillName' not found. Install: npx skills add https://github.com/vancebs/skills --skill $skillName"
-}
+[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
+sys.exit(1)") || echo "❌ gerrit-api not found: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
 ```
+
+> 如需 Windows PowerShell 版本、验证命令，或同时使用多个 skill 时发生 `SKILL_DIR` 冲突，参见：
+> - **skill-guide Step 2**（SKILL_DIR 检测完整方法）
+> - **skill-guide 错误 7**（多 skill SKILL_DIR 冲突处理）
 
 ---
 
@@ -273,6 +259,8 @@ Use this when you need to react to Gerrit events in real time or collect events 
 ## Configuration Reference
 
 ### Config File Search Order (Highest Priority First)
+
+> Follows **skill-guide Rule 3** (config file search order). If config is not being loaded, see skill-guide Error 2.
 
 | Priority | Path | Notes |
 |---|---|---|

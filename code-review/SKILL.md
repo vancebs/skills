@@ -35,57 +35,24 @@ keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
 
 ## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-> 如果遇到路径相关问题，安装 `skill-guide`：
-> `npx skills add https://github.com/vancebs/skills --skill skill-guide`
-
 ```bash
 # Linux / macOS
 export SKILL_WORKSPACE="$(pwd)"
-
-# 设置 code-review skill 目录
 export SKILL_DIR=$(python3 -c "
-import os, sys
-from pathlib import Path
-name = 'code-review'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
-    if p.is_dir():
-        print(p); sys.exit(0)
-sys.exit(1)
-") || echo "ERROR: code-review skill not found — npx skills add https://github.com/vancebs/skills --skill code-review"
+import os, sys; from pathlib import Path; n='code-review'
+ws=Path(os.environ.get('SKILL_WORKSPACE',os.getcwd()))
+[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
+sys.exit(1)") || echo "❌ code-review not found: npx skills add https://github.com/vancebs/skills --skill code-review"
 
 # 设置 gerrit-api skill 目录（独立变量，避免与 SKILL_DIR 冲突）
 export GERRIT_API_SKILL_DIR=$(python3 -c "
-import os, sys
-from pathlib import Path
-name = 'gerrit-api'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
-    if p.is_dir():
-        print(p); sys.exit(0)
-sys.exit(1)
-") || echo "ERROR: gerrit-api skill not found — npx skills add https://github.com/vancebs/skills --skill gerrit-api"
+import os, sys; from pathlib import Path; n='gerrit-api'
+ws=Path(os.environ.get('SKILL_WORKSPACE',os.getcwd()))
+[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
+sys.exit(1)") || echo "❌ gerrit-api not found: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
 ```
 
-```powershell
-# Windows PowerShell
-$env:SKILL_WORKSPACE = (Get-Location).Path
-
-# 设置 code-review skill 目录
-$env:SKILL_DIR = @(
-    "$env:SKILL_WORKSPACE\.agents\skills\code-review",
-    "$HOME\.agents\skills\code-review"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-# 设置 gerrit-api skill 目录
-$env:GERRIT_API_SKILL_DIR = @(
-    "$env:SKILL_WORKSPACE\.agents\skills\gerrit-api",
-    "$HOME\.agents\skills\gerrit-api"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $env:GERRIT_API_SKILL_DIR) {
-    Write-Warning "gerrit-api not found. Install: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
-}
-```
+> **SKILL_DIR 冲突 / Windows PowerShell 版本：** 参见 **skill-guide Step 2** 和 **skill-guide 错误 7**（多 skill SKILL_DIR 冲突处理）。
 
 ---
 
@@ -459,7 +426,9 @@ python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" review <change_number> 
 
 ## 配置参考
 
-### code-review 配置文件搜索路径（优先级从高到低）
+### code-review 配置文件搜索路径
+
+> 此顺序遵循 **skill-guide 规范 3**（配置文件搜索顺序）。若配置文件未被加载，参见 skill-guide 错误 2。
 
 | 优先级 | 路径 |
 |---|---|

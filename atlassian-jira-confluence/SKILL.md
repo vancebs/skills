@@ -28,23 +28,10 @@ set SKILL_WORKSPACE=%CD%
 $env:SKILL_WORKSPACE = (Get-Location).Path
 ```
 
-### Step 0B — 确认 Skill 安装目录（SKILL_DIR）
+### Step 0B — 确认 Skill 安装目录（SKILL_DIR，可选）
 
-> 注意：此 skill 通过 copy-paste 代码片段使用，不直接调用 skill 内的脚本，因此 `SKILL_DIR` 不影响日常使用。如果 agent 平台会自动设置 `SKILL_DIR`，则代码块中的 `_skill_dir()` 会自动生效。
-
-```bash
-# Linux / macOS — 检测并设置 SKILL_DIR（可选）
-export SKILL_DIR=$(python3 -c "
-import os, sys
-from pathlib import Path
-name = 'atlassian-jira-confluence'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
-    if p.is_dir():
-        print(p); sys.exit(0)
-sys.exit(1)
-") 2>/dev/null || true
-```
+> 本 skill 通过 copy-paste 代码片段使用，不直接调用 skill 内脚本，`SKILL_DIR` 仅在平台自动注入时使用。
+> 若需手动检测，参见 **skill-guide Step 2**。
 
 ---
 
@@ -242,7 +229,7 @@ def _skill_dir() -> Path:
 def load_config() -> dict:
     """Return credentials dict from the first config file found, or {}.
 
-    Search priority (highest first):
+    Search priority follows skill-guide Rule 3 (config file search order):
       1. {workspace}/config/atlassian-jira-confluence/.atlassian.json
       2. {workspace}/config/.atlassian.json
       3. {workspace}/.atlassian.json
@@ -251,6 +238,7 @@ def load_config() -> dict:
       6. $HOME/.config/.atlassian.json
       7. $HOME/.atlassian.json
 
+    If config is not loaded, see skill-guide Error 2.
     {workspace} = SKILL_WORKSPACE env var, or cwd when the script was started.
     """
     workspace = _workspace()

@@ -27,30 +27,17 @@ compatibility: Requires python3 (≥3.9) and ssh. Python stdlib only — no pip 
 
 ## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
 
-> 如果遇到路径相关问题，安装 `skill-guide`：`npx skills add https://github.com/vancebs/skills --skill skill-guide`
-
 ```bash
-# Linux / macOS / Git Bash
+# Linux / macOS
 export SKILL_WORKSPACE="$(pwd)"
 export SKILL_DIR=$(python3 -c "
-import os, sys
-from pathlib import Path
-name = 'agent-code-review'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
-    if p.is_dir():
-        print(p); sys.exit(0)
-sys.exit(1)
-") || echo "ERROR: skill not found — npx skills add https://github.com/vancebs/skills --skill agent-code-review"
-
-# Windows PowerShell
-$env:SKILL_WORKSPACE = (Get-Location).Path
-$skillName = 'agent-code-review'
-$env:SKILL_DIR = @(
-    "$env:SKILL_WORKSPACE\.agents\skills\$skillName",
-    "$HOME\.agents\skills\$skillName"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
+import os, sys; from pathlib import Path; n='agent-code-review'
+ws=Path(os.environ.get('SKILL_WORKSPACE',os.getcwd()))
+[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
+sys.exit(1)") || echo "❌ agent-code-review not found: npx skills add https://github.com/vancebs/skills --skill agent-code-review"
 ```
+
+> **Windows PowerShell 版本 / SKILL_DIR 设置问题：** 参见 **skill-guide Step 2**。
 
 ---
 
@@ -345,7 +332,9 @@ python3 "$SKILL_DIR/scripts/post_result.py" \
 
 ## 配置参考
 
-### 配置文件搜索路径（优先级从高到低）
+### 配置文件搜索路径
+
+> 此顺序遵循 **skill-guide 规范 3**（配置文件搜索顺序）。若配置文件未被加载，参见 skill-guide 错误 2。
 
 | 优先级 | 路径 |
 |---|---|
