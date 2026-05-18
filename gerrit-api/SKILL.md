@@ -3,8 +3,7 @@ name: gerrit-api
 description: Interact with Gerrit Code Review via the REST API — query changes, fetch diffs, post reviews with labels and inline comments, and manage change lifecycle. Also supports real-time event streaming via SSH (stream-events).
 license: Apache-2.0
 compatibility: Requires python3 (≥3.9) and ssh. All scripts use Python stdlib only — no pip install needed.
-dependencies:
-  - t2-config
+dependencies: []
 metadata:
   based-on: https://github.com/yurnov/gerrit-in-5-min (gerrit-review skill by @yurnov)
   keywords: [gerrit, code review, code review automation, developer tools, stream-events, ssh]
@@ -33,31 +32,36 @@ python3 --version   # must be ≥ 3.9
 ssh -V              # must be installed (for stream-events only)
 ```
 
-### Step 2 — Configure Credentials (via t2-config)
-
-> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
-> Config stored at: `${CFG_DIR}/gerrit-api.json`
+### Step 2 — Set Environment Variables
 
 ```bash
-# Set config (run once, values persist in ${CFG_DIR}/gerrit-api.json)
-python3 scripts/t2_config.py set gerrit-api/url       "https://gerrit.example.com"
-python3 scripts/t2_config.py set gerrit-api/username  "john.doe"
-python3 scripts/t2_config.py set gerrit-api/password  "your-http-credential-token"
+# Required (set once per session or in your shell profile)
+export GERRIT_URL="https://gerrit.example.com"
+export GERRIT_USERNAME="john.doe"
+export GERRIT_HTTP_PASSWORD="your-http-credential-token"
 
-# SSH stream-events (optional)
-python3 scripts/t2_config.py set gerrit-api/ssh_host     "gerrit.example.com"
-python3 scripts/t2_config.py set gerrit-api/ssh_port     29418
-python3 scripts/t2_config.py set gerrit-api/ssh_username "john.doe"
-python3 scripts/t2_config.py set gerrit-api/ssh_key      "~/.ssh/id_rsa"
+# SSH stream-events (optional — defaults derived from GERRIT_URL)
+export GERRIT_SSH_HOST="gerrit.example.com"   # default: host from GERRIT_URL
+export GERRIT_SSH_PORT=29418                   # default: 29418
+export GERRIT_SSH_USERNAME="john.doe"          # default: GERRIT_USERNAME
+export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # default: ~/.ssh/id_rsa
 ```
 
 > ⚠️ **HTTP Password** ≠ Gerrit login password. Generate at: Gerrit → Settings → HTTP Credentials → Generate Password
->
 > ⚠️ **SSH Key** must be uploaded: Gerrit → Settings → SSH Keys → Add Key
 
-Add to `.gitignore`:
+Windows CMD:
+```cmd
+set GERRIT_URL=https://gerrit.example.com
+set GERRIT_USERNAME=john.doe
+set GERRIT_HTTP_PASSWORD=your-http-credential-token
 ```
-config/gerrit-api.json
+
+Windows PowerShell:
+```powershell
+$env:GERRIT_URL = "https://gerrit.example.com"
+$env:GERRIT_USERNAME = "john.doe"
+$env:GERRIT_HTTP_PASSWORD = "your-http-credential-token"
 ```
 
 ### Step 3 — Test the Connection
@@ -108,8 +112,7 @@ Use `current` as the revision to target the latest patch set.
 Use this when you need to perform a code review on a Gerrit change.
 
 **Checklist:**
-- [ ] 1. Record workspace: `export SKILL_WORKSPACE="$(pwd)"`
-- [ ] 2. Find changes needing review:
+- [ ] 1. Find changes needing review:
   ```bash
   python3 scripts/gerrit_api.py query "status:open+reviewer:self+-owner:self"
   ```
@@ -175,19 +178,17 @@ Use this when you need to react to Gerrit events in real time or collect events 
 | Dry run | Testing / debugging (no writes) | `--dry-run --summary` |
 
 **Checklist:**
-- [ ] 1. Record workspace: `export SKILL_WORKSPACE="$(pwd)"`
-- [ ] 2. Test SSH: `ssh -p 29418 <username>@<host> gerrit version`
+- [ ] 1. Test SSH: `ssh -p 29418 <username>@<host> gerrit version`
 - [ ] 3. Test with dry run (no file writes, verify events arrive):
   ```bash
   python3 scripts/gerrit_stream_events.py \
-    --workspace "$SKILL_WORKSPACE" --dry-run --summary --max-events 5
+    --dry-run --summary --max-events 5
   ```
 - [ ] 4. Start the background listener:
   ```bash
   # Write to file + auto-reconnect
   python3 scripts/gerrit_stream_events.py \
-    --workspace "$SKILL_WORKSPACE" \
-    --output "$SKILL_WORKSPACE/events.jsonl" \
+    --output events.jsonl \
     --reconnect --quiet &
   echo "Listener PID: $!"
   ```
@@ -217,41 +218,20 @@ Use this when you need to react to Gerrit events in real time or collect events 
 
 ## Configuration Reference
 
-### Config File Search Order (Highest Priority First)
+### Config Reference
 
-| Priority | Path | Notes |
+| Env var | Required | Description |
 |---|---|---|
-| 1 ✅ preferred | `${CFG_DIR}/gerrit-api.json` | Set via t2-config |
-| 2 | `{workspace}/config/gerrit-api/gerrit_config.json` | Legacy |
-| 3 | `{workspace}/config/gerrit_config.json` | Legacy |
-| 4 | `{workspace}/gerrit_config.json` | Legacy |
-| 5 | `$HOME/.config/gerrit-api/gerrit_config.json` | Per-user |
-| 6 | `$HOME/.config/gerrit_config.json` | |
-| 7 | `$HOME/gerrit_config.json` | |
-
-`{workspace}` = value of `SKILL_WORKSPACE` env var, or the directory where the script is invoked.
-
-### Environment Variables (fallback when no config file)
-
-| Variable | Config key | Default | Required |
-|---|---|---|---|
-| `GERRIT_URL` | `url` | — | ✅ Yes |
-| `GERRIT_USERNAME` | `username` | — | ✅ Yes |
-| `GERRIT_HTTP_PASSWORD` | `password` | — | ✅ Yes |
-| `GERRIT_SSH_HOST` | `ssh_host` | derived from `url` | No |
-| `GERRIT_SSH_PORT` | `ssh_port` | `29418` | No |
-| `GERRIT_SSH_USERNAME` | `ssh_username` | same as `username` | No |
-| `GERRIT_SSH_KEY` | `ssh_key` | `~/.ssh/` defaults | No |
-| `HOOK_URL` | `hook_url` | — | No |
-| `HOOK_TOKEN` | `hook_token` | — | No |
-| `OUTBOX_PATH` | `outbox_path` | `{workspace}/events.outbox.jsonl` | No |
-
-Set env vars:
-```bash
-export GERRIT_URL="https://gerrit.example.com"
-export GERRIT_USERNAME="john.doe"
-export GERRIT_HTTP_PASSWORD="your-token"
-```
+| `GERRIT_URL` | ✅ | Gerrit base URL |
+| `GERRIT_USERNAME` | ✅ | Gerrit username |
+| `GERRIT_HTTP_PASSWORD` | ✅ | HTTP credential token |
+| `GERRIT_SSH_HOST` | optional | SSH host (default: from GERRIT_URL) |
+| `GERRIT_SSH_PORT` | optional | SSH port (default: 29418) |
+| `GERRIT_SSH_USERNAME` | optional | SSH username (default: GERRIT_USERNAME) |
+| `GERRIT_SSH_KEY` | optional | SSH key path (default: ~/.ssh/id_rsa) |
+| `GERRIT_HOOK_URL` | optional | Webhook URL for event forwarding |
+| `GERRIT_HOOK_TOKEN` | optional | Webhook token |
+| `GERRIT_OUTBOX_PATH` | optional | Path to outbox file |
 
 ---
 
@@ -270,9 +250,11 @@ export GERRIT_HTTP_PASSWORD="your-token"
 ```
 python3 scripts/gerrit_stream_events.py [options]
 
-Config:
-  --config FILE         Config file (searches 7 locations if omitted)
-  --workspace DIR       Project workspace dir (overrides SKILL_WORKSPACE / cwd)
+SSH connection (override env vars):
+  --host HOST           SSH hostname (overrides GERRIT_SSH_HOST / GERRIT_URL)
+  --port PORT           SSH port (overrides GERRIT_SSH_PORT, default: 29418)
+  --username USER       SSH username (overrides GERRIT_SSH_USERNAME / GERRIT_USERNAME)
+  --key PATH            SSH private key path (overrides GERRIT_SSH_KEY)
 
 Filtering:
   --filter TYPES        Comma-separated event types to include (default: all)
@@ -343,14 +325,13 @@ Description=Gerrit stream-events listener
 After=network.target
 
 [Service]
-# SKILL_WORKSPACE = agent's project dir (for config file & events.jsonl)
-# Replace /opt/gerrit-workspace and /home/user/.agents/skills/gerrit-api with actual paths
-Environment=SKILL_WORKSPACE=/opt/gerrit-workspace
+Environment=GERRIT_URL=https://gerrit.example.com
+Environment=GERRIT_USERNAME=john.doe
+Environment=GERRIT_HTTP_PASSWORD=secret
+Environment=GERRIT_WORKSPACE=/opt/gerrit-workspace
 ExecStart=/usr/bin/python3 /home/user/.agents/skills/gerrit-api/scripts/gerrit_stream_events.py \
-    --workspace ${SKILL_WORKSPACE} \
-    --output ${SKILL_WORKSPACE}/events.jsonl \
+    --output ${GERRIT_WORKSPACE}/events.jsonl \
     --hook-url http://127.0.0.1:8443/events \
-    --hook-token *** \
     --reconnect
 Restart=on-failure
 RestartSec=10
@@ -393,9 +374,7 @@ Every event has these extra fields added by the script:
 | Symptom | Check | Fix |
 |---|---|---|
 | `HTTP 401 Unauthorized` | HTTP password correct? | Re-generate at Gerrit → Settings → HTTP Credentials |
-| `HTTP 404 Not Found` | Change number exists? URL has trailing slash? | Verify change number; remove trailing slash from `url` |
-| `HTTP 409 Conflict` | Trying to review a change-edit? Missing approvals for submit? | Check change status in Gerrit UI |
-| Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 scripts/gerrit_api.py help` to see search paths |
+| `HTTP 404 Not Found` | Change number exists? URL has trailing slash? | Verify change number; remove trailing slash from `GERRIT_URL` |
 | SSH auth fails | SSH key uploaded to Gerrit? Right user/port? | Run `ssh -p 29418 <user>@<host> gerrit version` to test |
 | SSH "access denied" | Account lacks Stream Events capability | Ask Gerrit admin to grant under Global Capabilities |
 
@@ -480,9 +459,8 @@ Common query operators: `status:open`, `status:merged`, `owner:self`, `reviewer:
 
 ### 明确禁止的操作
 
-- ⛔ **禁止将 `--hook-url` 指向非 loopback 地址（127.0.0.x）而不使用 TLS**：明文传输 token 会导致凭据泄露
-- ⛔ **禁止在日志/stderr 中打印 `password`、`hook_token` 或任何凭据字段**：不论任何异常情况
-- ⛔ **禁止在配置文件中硬编码密码后提交到 Git**：必须将 `config/gerrit-api/gerrit_config.json` 加入 `.gitignore`
+- ⛔ **禁止在日志/stderr 中打印 `GERRIT_HTTP_PASSWORD`、`GERRIT_HOOK_TOKEN` 或任何凭据字段**：不论任何异常情况
+- ⛔ **禁止将凭据硬编码在脚本中**：必须通过环境变量传入
 - ⛔ **禁止对同一 change 的同一 patchset 重复提交 `review`**：非幂等操作，会产生重复评论；调用前检查该 patchset 是否已有本账号评论
 
 ### 边界条件
@@ -516,7 +494,6 @@ Common query operators: `status:open`, `status:merged`, `owner:self`, `reviewer:
 
 - `scripts/gerrit_api.py` — REST API helper (cross-platform, Python stdlib only)
 - `scripts/gerrit_stream_events.py` — SSH stream-events listener with file/hook delivery
-- `scripts/gerrit_config.json.example` — config template
 
 ## References
 

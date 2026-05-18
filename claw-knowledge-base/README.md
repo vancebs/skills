@@ -11,10 +11,10 @@ OpenClaw 多 Agent 共享知识库。`KNOWLEDGE_BASE_DIR` 下所有 `.md` 文件
 export KNOWLEDGE_BASE_DIR="/path/to/your/knowledge-base"
 
 # 2. 检查环境
-python3 "$SKILL_DIR/scripts/check_env.py"
+python3 scripts/check_env.py
 
 # 3. 初始化目录结构（一次性）
-python3 "$SKILL_DIR/scripts/init_dirs.py"
+python3 scripts/init_dirs.py
 
 # 4. 配置 openclaw.json（见 SKILL.md Step 3）
 ```

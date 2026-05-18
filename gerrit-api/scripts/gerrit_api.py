@@ -2,21 +2,15 @@
 """
 gerrit_api.py — Gerrit REST API helper (cross-platform, Python 3.9+)
 
-Replaces gerrit_api.sh with a pure-Python implementation that works on
-Windows, Linux, and macOS without any extra dependencies (uses only the
-Python standard library: urllib, json, base64, pathlib).
+Pure-Python implementation that works on Windows, Linux, and macOS without
+any extra dependencies (uses only the Python standard library: urllib, json,
+base64, pathlib).
 
-Credentials are loaded from the first config file found (priority order):
-  1. ${CFG_DIR}/gerrit-api.json                           ← preferred (t2-config)
-  2. {workspace}/config/gerrit-api/gerrit_config.json
-  3. {workspace}/config/gerrit_config.json
-  4. {workspace}/gerrit_config.json
-  5. {skill-dir}/gerrit_config.json
-  6. $HOME/.config/gerrit-api/gerrit_config.json
-  7. $HOME/.config/gerrit_config.json
-  8. $HOME/gerrit_config.json
-  Then fall back to environment variables:
-     GERRIT_URL, GERRIT_USERNAME, GERRIT_HTTP_PASSWORD
+Credentials are read exclusively from environment variables:
+  GERRIT_URL              Gerrit base URL (required), e.g. https://gerrit.example.com
+  GERRIT_USERNAME         Gerrit username (required)
+  GERRIT_HTTP_PASSWORD    HTTP credential token (required)
+                          Generate at: Gerrit → Settings → HTTP Credentials
 
 Usage:
   python gerrit_api.py <command> [args...]
@@ -46,7 +40,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import warnings
-from pathlib import Path
 
 
 def _ssl_noverify_context() -> ssl.SSLContext:
@@ -68,117 +61,22 @@ def _is_ssl_error(exc: Exception) -> bool:
     return "ssl" in msg or "certificate" in msg
 
 
-# ─── Constants ────────────────────────────────────────────────────────────────
-
-_SKILL_NAME = "gerrit-api"
-_CONFIG_FILENAME = "gerrit_config.json"
-
-
-# ─── Workspace / skill-dir resolution ────────────────────────────────────────
-
-def _workspace() -> Path:
-    """Return the **agent's project workspace** directory.
-
-    Used for finding config files and output files that belong to the project.
-    Priority: SKILL_WORKSPACE env var > cwd.
-
-    NOTE: Do NOT use this to locate this skill's own scripts or assets.
-    Use _skill_dir() for that.
-    """
-    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
-    return Path(ws).resolve() if ws else Path.cwd()
-
-
-def _skill_dir() -> Path:
-    """Return this skill's installation directory.
-
-    Used for locating this skill's own scripts, example files, etc.
-    Priority: SKILL_DIR env var (set by the agent platform) > derivation from
-    __file__ (scripts/ is one level below the skill root).
-
-    Distinct from _workspace(), which is the agent's project directory.
-    """
-    sd = os.environ.get("SKILL_DIR", "").strip()
-    if sd:
-        return Path(sd).resolve()
-    return Path(__file__).resolve().parent.parent  # scripts/../ == gerrit-api/
-
-
 # ─── Config loading ───────────────────────────────────────────────────────────
 
-def _find_config_file() -> str | None:
-    """Return the first config file found across the priority search paths."""
-    # Priority 1: ${CFG_DIR}/gerrit-api.json (t2-config)
-    cfg_dir = os.environ.get("CFG_DIR", "").strip()
-    if cfg_dir:
-        p = Path(cfg_dir) / "gerrit-api.json"
-        if p.is_file():
-            return str(p)
-
-    workspace = _workspace()
-    skill_dir = _skill_dir()
-    home = Path.home()
-
-    candidates = [
-        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
-        workspace / "config" / _CONFIG_FILENAME,
-        workspace / _CONFIG_FILENAME,
-        skill_dir / _CONFIG_FILENAME,
-        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
-        home / ".config" / _CONFIG_FILENAME,
-        home / _CONFIG_FILENAME,
-    ]
-    for path in candidates:
-        if path.is_file():
-            return str(path)
-    return None
-
-
-def _preferred_config_path() -> str:
-    return str(_workspace() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
-
-
 def load_config() -> tuple[str, str, str]:
-    """Return (url, username, password) from config file + env vars."""
-    cfg: dict = {}
+    """Return (url, username, password) from environment variables."""
+    url      = os.environ.get("GERRIT_URL", "").strip().rstrip("/")
+    username = os.environ.get("GERRIT_USERNAME", "").strip()
+    password = os.environ.get("GERRIT_HTTP_PASSWORD", "").strip()
 
-    found = _find_config_file()
-    if found:
-        try:
-            with open(found, encoding="utf-8") as f:
-                cfg = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            _die(f"Could not read config file {found}: {e}")
-
-    def _val(key: str, env_var: str) -> str:
-        return cfg.get(key) or os.environ.get(env_var, "")
-
-    url      = _val("url",      "GERRIT_URL")
-    username = _val("username", "GERRIT_USERNAME")
-    password = _val("password", "GERRIT_HTTP_PASSWORD")
-
-    preferred = _preferred_config_path()
     if not url:
-        _die(
-            "Gerrit base URL is not configured.\n"
-            f"  → Create {preferred} (copy scripts/gerrit_config.json.example)\n"
-            "  → Or: set GERRIT_URL environment variable"
-        )
+        _die("GERRIT_URL is not set.\n  → export GERRIT_URL=\"https://gerrit.example.com\"")
     if not username:
-        _die(
-            "Gerrit username is not configured.\n"
-            f"  → Set \"username\" in {preferred}  (Gerrit → Settings → Profile → Username)\n"
-            "  → Or: set GERRIT_USERNAME environment variable"
-        )
+        _die("GERRIT_USERNAME is not set.\n  → export GERRIT_USERNAME=\"john.doe\"")
     if not password:
-        _die(
-            "Gerrit HTTP password is not configured.\n"
-            f"  → Set \"password\" in {preferred}\n"
-            "    (Gerrit → Settings → HTTP Credentials → Generate Password)\n"
-            "  → Or: set GERRIT_HTTP_PASSWORD environment variable"
-        )
+        _die("GERRIT_HTTP_PASSWORD is not set.\n  → export GERRIT_HTTP_PASSWORD=\"your-http-token\"\n  (Generate at: Gerrit → Settings → HTTP Credentials)")
 
-    return url.rstrip("/"), username, password
+    return url, username, password
 
 
 # ─── HTTP helpers ─────────────────────────────────────────────────────────────

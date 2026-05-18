@@ -149,15 +149,17 @@ python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open"
 python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open"
 ```
 
-### 规则 2：读取/创建配置文件 → 用 t2-config 或 `$SKILL_WORKSPACE`
+### 规则 2：读取/创建配置文件 → 用环境变量或 `$SKILL_WORKSPACE`
 
-> **v2.0+ 推荐：** 使用 `t2-config` skill 管理所有配置。设置 `CFG_DIR` 后，各 skill 的 Python 脚本会自动从 `${CFG_DIR}/<namespace>.json` 读取配置。
+> **v2.0+ 推荐：** 使用环境变量管理所有配置。各 skill 的 Python 脚本直接从对应的环境变量读取配置（如 `GERRIT_URL`、`ATLASSIAN_API_TOKEN` 等）。
 
 ```bash
-# ✅ 正确（t2-config，v2.0+ 推荐）
-python3 scripts/t2_config.py set gerrit-api/url "https://gerrit.example.com"
+# ✅ 正确（v2.0+ 环境变量，推荐）
+export GERRIT_URL="https://gerrit.example.com"
+export GERRIT_USERNAME="john.doe"
+export GERRIT_HTTP_PASSWORD="your-http-token"
 
-# ✅ 正确（传统方式，仍受支持）
+# ✅ 正确（传统方式，输出文件仍使用 SKILL_WORKSPACE）
 mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
 ```
 
@@ -368,30 +370,30 @@ python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
 ```bash
 # ✅ Linux / macOS / Git Bash
 export GERRIT_API_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/gerrit-api"
-export CODE_REVIEW_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/agent-code-review"
+export CODE_REVIEW_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/code-review"
 
 # 调用时明确指定
 python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" ...
-python3 "$CODE_REVIEW_SKILL_DIR/scripts/poll_events.py" ...
+python3 "$CODE_REVIEW_SKILL_DIR/scripts/check_env.py" ...
 ```
 
 ```powershell
 # ✅ Windows PowerShell
 $env:GERRIT_API_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\gerrit-api"
-$env:CODE_REVIEW_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\agent-code-review"
+$env:CODE_REVIEW_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\code-review"
 
 # 调用时明确指定
 python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" ...
-python "$env:CODE_REVIEW_SKILL_DIR\scripts\poll_events.py" ...
+python "$env:CODE_REVIEW_SKILL_DIR\scripts\check_env.py" ...
 ```
 
 ```batch
 :: ✅ Windows CMD
 set GERRIT_API_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\gerrit-api
-set CODE_REVIEW_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\agent-code-review
+set CODE_REVIEW_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\code-review
 
 python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" ...
-python "%CODE_REVIEW_SKILL_DIR%\scripts\poll_events.py" ...
+python "%CODE_REVIEW_SKILL_DIR%\scripts\check_env.py" ...
 ```
 
 ---

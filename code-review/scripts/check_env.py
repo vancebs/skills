@@ -2,65 +2,30 @@
 """
 check_env.py — Environment checker for code-review skill.
 
-Verifies that gerrit-api skill is installed and code-review config exists.
-Gerrit connectivity is verified by gerrit-api's own check_env.py.
+Checks:
+  1. Python >= 3.9
+  2. gerrit-api skill is installed (.agents/skills/gerrit-api/)
+  3. GERRIT_URL, GERRIT_USERNAME, GERRIT_HTTP_PASSWORD env vars are set
+  4. CODE_REVIEW_TEST_MODE env var (warn if not set, default true)
+  5. T2MCodingRule skill is installed (.agents/skills/T2MCodingRule/)
 
 Usage:
-    python3 "$SKILL_DIR/scripts/check_env.py"
+    python3 scripts/check_env.py
 
 Exit codes:
     0 — All checks passed
     1 — One or more checks failed
 """
 
-import json
 import os
 import platform
 import sys
 from pathlib import Path
 
-_SKILL_NAME      = "code-review"
-_CONFIG_FILENAME = "code_review_config.json"
 _OK   = "✅"
 _FAIL = "❌"
 _WARN = "⚠️ "
 
-
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
-
-def _workspace():
-    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
-    return Path(ws).resolve() if ws else Path.cwd()
-
-
-def _skill_dir():
-    sd = os.environ.get("SKILL_DIR", "").strip()
-    return Path(sd).resolve() if sd else Path(__file__).resolve().parent.parent
-
-
-def _find_config():
-    ws = _workspace()
-    sd = _skill_dir()
-    home = Path.home()
-    for p in [
-        ws   / "config" / _SKILL_NAME / _CONFIG_FILENAME,
-        ws   / "config" / _CONFIG_FILENAME,
-        ws   /            _CONFIG_FILENAME,
-        sd   /            _CONFIG_FILENAME,
-        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
-        home / ".config" / _CONFIG_FILENAME,
-        home /             _CONFIG_FILENAME,
-    ]:
-        if p.is_file():
-            return p
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Checks
-# ---------------------------------------------------------------------------
 
 def check_python():
     v = sys.version_info
@@ -70,86 +35,63 @@ def check_python():
     return ok
 
 
-def check_gerrit_api_skill():
-    """Check gerrit-api skill is installed; print install command if missing."""
-    ws   = _workspace()
-    home = Path.home()
-    candidates = [
-        ws   / ".agents" / "skills" / "gerrit-api",
-        home / ".agents" / "skills" / "gerrit-api",
-    ]
-    for p in candidates:
+def _find_skill(name: str) -> Path | None:
+    for base in [Path.cwd(), Path.home()]:
+        p = base / ".agents" / "skills" / name
         if p.is_dir():
-            print(f"{_OK} gerrit-api skill 已安装: {p}")
-            # Also check GERRIT_API_SKILL_DIR env var
-            gsd = os.environ.get("GERRIT_API_SKILL_DIR", "").strip()
-            if not gsd:
-                print(f"{_WARN}  GERRIT_API_SKILL_DIR 未设置  →  建议设置为: {p}")
-                print(f"       Linux/macOS:  export GERRIT_API_SKILL_DIR=\"{p}\"")
-                print(f"       PowerShell:   $env:GERRIT_API_SKILL_DIR = \"{p}\"")
-            else:
-                print(f"{_OK} GERRIT_API_SKILL_DIR: {gsd}")
-            return True
+            return p
+    return None
 
+
+def check_gerrit_api_skill():
+    p = _find_skill("gerrit-api")
+    if p:
+        print(f"{_OK} gerrit-api skill 已安装: {p}")
+        return True
     print(f"{_FAIL} gerrit-api skill 未安装（必须安装，code-review 的所有 Gerrit 操作依赖它）")
     print(f"      安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api")
-    print(f"      安装后运行 gerrit-api 的 check_env.py 配置 Gerrit 连接：")
-    print(f"        python3 \"$GERRIT_API_SKILL_DIR/scripts/check_env.py\"")
     return False
 
 
-def check_config():
-    cfg_path = _find_config()
-    if not cfg_path:
-        ws  = _workspace()
-        sd  = _skill_dir()
-        dst = ws / "config" / _SKILL_NAME / _CONFIG_FILENAME
-        src = sd / "scripts" / "config.json.example"
-        print(f"{_FAIL} code-review 配置文件未找到  →  请创建：")
-        print(f"      # Linux / macOS:")
-        print(f"      mkdir -p \"{ws / 'config' / _SKILL_NAME}\"")
-        print(f"      cp \"{src}\" \"{dst}\"")
-        print(f"      # Windows PowerShell:")
-        print(f"      New-Item -ItemType Directory -Force \"{ws / 'config' / _SKILL_NAME}\"")
-        print(f"      Copy-Item \"{src}\" \"{dst}\"")
-        return None, False
-
-    try:
-        with open(cfg_path, encoding="utf-8") as f:
-            cfg = json.load(f)
-        print(f"{_OK} code-review 配置文件: {cfg_path}")
-        tm = cfg.get("test_mode", True)
-        print(f"     test_mode = {tm}  {'（仅打印报告，不写 Gerrit）' if tm else '（将发布到 Gerrit）'}")
-        return cfg, True
-    except json.JSONDecodeError as e:
-        print(f"{_FAIL} 配置文件 JSON 格式错误: {e}")
-        return None, False
-
-
-def check_workspace_writable():
-    ws   = _workspace()
-    test = ws / ".cr_write_test"
-    try:
-        test.write_text("ok")
-        test.unlink()
-        print(f"{_OK} Workspace 可写: {ws}")
+def check_t2mcodingrule_skill():
+    p = _find_skill("T2MCodingRule")
+    if p:
+        print(f"{_OK} T2MCodingRule skill 已安装: {p}")
         return True
-    except Exception as e:
-        print(f"{_FAIL} Workspace 不可写: {ws}  ({e})")
-        return False
+    print(f"{_FAIL} T2MCodingRule skill 未安装（必须安装，提供审查规范）")
+    print(f"      安装命令: npx skills add https://github.com/vancebs/skills --skill T2MCodingRule")
+    return False
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def check_gerrit_env_vars():
+    ok = True
+    for var in ["GERRIT_URL", "GERRIT_USERNAME", "GERRIT_HTTP_PASSWORD"]:
+        val = os.environ.get(var, "")
+        if val:
+            display = val if var in ("GERRIT_URL", "GERRIT_USERNAME") else val[:4] + "****"
+            print(f"{_OK} {var} = {display}")
+        else:
+            print(f"{_FAIL} {var} 未设置  →  export {var}=...")
+            ok = False
+    return ok
+
+
+def check_code_review_mode():
+    val = os.environ.get("CODE_REVIEW_TEST_MODE", "")
+    if not val:
+        print(f"{_WARN} CODE_REVIEW_TEST_MODE 未设置（默认 true = 仅打印报告，不写 Gerrit）")
+        print(f"       如需发布到 Gerrit: export CODE_REVIEW_TEST_MODE=false")
+    else:
+        mode_desc = "（仅打印报告，不写 Gerrit）" if val.lower() == "true" else "（将发布到 Gerrit）"
+        print(f"{_OK} CODE_REVIEW_TEST_MODE = {val}  {mode_desc}")
+    return True
+
 
 def main():
     print("=" * 62)
     print("  code-review 环境检查")
     print("=" * 62)
-    print(f"\n  系统:            {platform.system()} {platform.release()}")
-    print(f"  SKILL_WORKSPACE: {_workspace()}")
-    print(f"  SKILL_DIR:       {_skill_dir()}")
+    print(f"\n  系统: {platform.system()} {platform.release()}")
     print()
 
     results = {}
@@ -157,26 +99,20 @@ def main():
     print("─── Python 环境 ──────────────────────────────────────────")
     results["python"] = check_python()
 
-    print("\n─── gerrit-api skill（必须）──────────────────────────────")
+    print("\n─── 依赖 skill ───────────────────────────────────────────")
     results["gerrit_api"] = check_gerrit_api_skill()
+    results["t2mcodingrule"] = check_t2mcodingrule_skill()
 
-    print("\n─── code-review 配置文件 ─────────────────────────────────")
-    _, results["config"] = check_config()
+    print("\n─── Gerrit 环境变量 ──────────────────────────────────────")
+    results["gerrit_env"] = check_gerrit_env_vars()
 
-    print("\n─── Workspace 写权限 ─────────────────────────────────────")
-    results["workspace"] = check_workspace_writable()
+    print("\n─── code-review 配置 ─────────────────────────────────────")
+    check_code_review_mode()
 
     print("\n" + "=" * 62)
     fails = [k for k, v in results.items() if not v]
     if not fails:
         print("✅ 所有检查通过！可以开始使用 code-review skill。")
-        print()
-        print("   提示: 运行 gerrit-api 的环境检查以验证 Gerrit 连接：")
-        gsd = os.environ.get("GERRIT_API_SKILL_DIR", "").strip()
-        if gsd:
-            print(f"     python3 \"{gsd}/scripts/check_env.py\"")
-        else:
-            print(f"     python3 \"$GERRIT_API_SKILL_DIR/scripts/check_env.py\"")
         return 0
     else:
         print(f"❌ {len(fails)} 项检查未通过: {', '.join(fails)}")

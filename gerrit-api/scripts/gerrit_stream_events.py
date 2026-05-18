@@ -21,11 +21,11 @@ Usage:
   --hook-url URL        POST each event as JSON to this URL.
                         Example: --hook-url http://127.0.0.1:8443/events
   --hook-token TOKEN    Sent as X-Auth-Token header. Never logged. Can also be
-                        set via config key hook_token or env HOOK_TOKEN.
+                        set via env GERRIT_HOOK_TOKEN.
   --hook-retries N      Max retries on 5xx/network error (default: 3).
   --hook-timeout SECS   Per-request timeout in seconds (default: 3).
   --outbox PATH         On hook failure, append missed events here for later
-                        replay. Default: <workspace>/events.outbox.jsonl.
+                        replay. Default: events.outbox.jsonl in cwd.
 
 ─── Daemon / process ─────────────────────────────────────────────────────────
   --pid-file PATH       Write PID to PATH on startup; remove on clean exit.
@@ -49,17 +49,17 @@ Usage:
   --quiet               Suppress all log output.
 
 ─── Misc ─────────────────────────────────────────────────────────────────────
-  --config FILE         Config file path (searches 7 default locations).
   --help                Show this help.
 
-Credentials (config file keys / env vars / CLI override priority: CLI > config > env):
-  ssh_host      / GERRIT_SSH_HOST      SSH hostname (derived from url if absent)
-  ssh_port      / GERRIT_SSH_PORT      SSH port (default: 29418)
-  ssh_username  / GERRIT_SSH_USERNAME  SSH username (falls back to username)
-  ssh_key       / GERRIT_SSH_KEY       Path to SSH private key (optional)
-  hook_url      / HOOK_URL             HTTP hook URL
-  hook_token    / HOOK_TOKEN           HTTP hook token (never logged)
-  outbox_path   / OUTBOX_PATH          Outbox file path
+Credentials (env vars / CLI override priority: CLI > env):
+  GERRIT_URL           (or GERRIT_SSH_HOST)  SSH hostname derived from GERRIT_URL
+  GERRIT_SSH_HOST      SSH hostname override (--host)
+  GERRIT_SSH_PORT      SSH port (--port, default: 29418)
+  GERRIT_SSH_USERNAME  SSH username (--username, falls back to GERRIT_USERNAME)
+  GERRIT_SSH_KEY       Path to SSH private key (--key, optional)
+  GERRIT_HOOK_URL      HTTP hook URL (or --hook-url)
+  GERRIT_HOOK_TOKEN    HTTP hook token (or --hook-token, never logged)
+  GERRIT_OUTBOX_PATH   Outbox file path (or --outbox)
 
 Event types emitted by Gerrit:
   patchset-created       A new patch set was uploaded
@@ -138,140 +138,49 @@ log = logging.getLogger("gerrit_stream_events")
 
 
 _SKILL_NAME = "gerrit-api"
-_CONFIG_FILENAME = "gerrit_config.json"
 
 
-# ─── Workspace resolution ─────────────────────────────────────────────────────
+# ─── SSH config loading ───────────────────────────────────────────────────────
 
-def _workspace(explicit: str | None = None) -> Path:
-    """Return the **agent's project workspace** directory.
+def _load_ssh_config(args: argparse.Namespace) -> dict:
+    """Build SSH config from CLI args and environment variables.
 
-    Used for finding config files and output files that belong to the project.
-    Priority: explicit arg > SKILL_WORKSPACE env var > cwd.
-
-    NOTE: Do NOT use this to locate this skill's own scripts or assets.
-    Use _skill_dir() for that.
+    Priority: CLI arg > env var > derived value (host from GERRIT_URL).
     """
-    if explicit:
-        return Path(explicit).resolve()
-    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
-    return Path(ws).resolve() if ws else Path.cwd()
+    # SSH host: --host > GERRIT_SSH_HOST > host from GERRIT_URL
+    host = getattr(args, "host", "") or os.environ.get("GERRIT_SSH_HOST", "")
+    if not host:
+        url = os.environ.get("GERRIT_URL", "")
+        if url:
+            host = urllib.parse.urlparse(url).hostname or ""
 
-
-def _skill_dir() -> Path:
-    """Return this skill's installation directory.
-
-    Used for locating this skill's own scripts, example files, etc.
-    Priority: SKILL_DIR env var (set by the agent platform) > derivation from
-    __file__ (scripts/ is one level below the skill root).
-
-    Distinct from _workspace(), which is the agent's project directory.
-    """
-    sd = os.environ.get("SKILL_DIR", "").strip()
-    if sd:
-        return Path(sd).resolve()
-    return Path(__file__).resolve().parent.parent  # scripts/../ == gerrit-api/
-
-
-# ─── Config loading ───────────────────────────────────────────────────────────
-
-def _find_config_file(explicit_path: str | None, ws: Path | None = None) -> str | None:
-    """Return the first config file found, searching in priority order.
-
-    Priority:
-      1. explicit_path (if --config was specified)
-      2. ${CFG_DIR}/gerrit-api.json                      ← preferred (t2-config)
-      3. {workspace}/config/{skill-name}/{filename}
-      4. {workspace}/config/{filename}
-      5. {workspace}/{filename}
-      6. {skill-dir}/{filename}                           ← dev/testing fallback
-      7. $HOME/.config/{skill-name}/{filename}
-      8. $HOME/.config/{filename}
-      9. $HOME/{filename}
-
-    {workspace} = SKILL_WORKSPACE env var, or --workspace arg, or cwd
-    {skill-dir} = skill installation directory (SKILL_DIR env var or __file__ derivation)
-    """
-    if explicit_path:
-        return explicit_path if Path(explicit_path).is_file() else None
-
-    # Priority 2: ${CFG_DIR}/gerrit-api.json (t2-config)
-    cfg_dir = os.environ.get("CFG_DIR", "").strip()
-    if cfg_dir:
-        p = Path(cfg_dir) / "gerrit-api.json"
-        if p.is_file():
-            return str(p)
-
-    workspace = ws or _workspace()
-    skill_dir = _skill_dir()
-    home = Path.home()
-
-    candidates = [
-        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
-        workspace / "config" / _CONFIG_FILENAME,
-        workspace / _CONFIG_FILENAME,
-        skill_dir / _CONFIG_FILENAME,
-        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
-        home / ".config" / _CONFIG_FILENAME,
-        home / _CONFIG_FILENAME,
-    ]
-    for path in candidates:
-        if path.is_file():
-            return str(path)
-    return None
-
-
-def _preferred_config_path(ws: Path | None = None) -> str:
-    """Return the recommended path at which the user should create the config file."""
-    return str((ws or _workspace()) / "config" / _SKILL_NAME / _CONFIG_FILENAME)
-
-def load_config(config_path: str | None, ws: Path | None = None) -> dict:
-    """Load credentials from config file (priority) then environment variables."""
-    cfg: dict = {}
-
-    found = _find_config_file(config_path, ws)
-    if found:
+    # SSH port: --port > GERRIT_SSH_PORT > 29418
+    port_arg = getattr(args, "port", 0) or 0
+    if port_arg:
+        port = port_arg
+    else:
+        raw_port = os.environ.get("GERRIT_SSH_PORT", "")
         try:
-            with open(found) as f:
-                cfg.update(json.load(f))
-            log.info("Using config: %s", found)
-        except (json.JSONDecodeError, OSError) as e:
-            log.warning("Could not read config file %s: %s", found, e)
+            port = int(raw_port) if raw_port else 29418
+        except ValueError:
+            port = 29418
 
-    # 2. Environment variable fallbacks
-    _env_fallback(cfg, "url",          "GERRIT_URL")
-    _env_fallback(cfg, "username",     "GERRIT_USERNAME")
-    _env_fallback(cfg, "password",     "GERRIT_HTTP_PASSWORD")
-    _env_fallback(cfg, "ssh_host",     "GERRIT_SSH_HOST")
-    _env_fallback(cfg, "ssh_port",     "GERRIT_SSH_PORT")
-    _env_fallback(cfg, "ssh_username", "GERRIT_SSH_USERNAME")
-    _env_fallback(cfg, "ssh_key",      "GERRIT_SSH_KEY")
+    # SSH username: --username > GERRIT_SSH_USERNAME > GERRIT_USERNAME
+    username = (
+        getattr(args, "username", "")
+        or os.environ.get("GERRIT_SSH_USERNAME", "")
+        or os.environ.get("GERRIT_USERNAME", "")
+    )
 
-    # Derive ssh_host from url when absent or empty (direct assignment also covers
-    # the edge case where config file contained an explicit empty string "ssh_host":"")
-    if not cfg.get("ssh_host") and cfg.get("url"):
-        parsed = urllib.parse.urlparse(cfg["url"])
-        cfg["ssh_host"] = parsed.hostname or ""
+    # SSH key: --key > GERRIT_SSH_KEY
+    key = getattr(args, "key", "") or os.environ.get("GERRIT_SSH_KEY", "")
 
-    # ssh_username falls back to http username (direct assignment for the same reason)
-    if not cfg.get("ssh_username"):
-        cfg["ssh_username"] = cfg.get("username", "")
-
-    # Convert port to int
-    raw_port = cfg.get("ssh_port", 29418)
-    try:
-        cfg["ssh_port"] = int(raw_port)
-    except (TypeError, ValueError):
-        cfg["ssh_port"] = 29418
-
-    return cfg
-
-
-def _env_fallback(cfg: dict, key: str, env_var: str) -> None:
-    if not cfg.get(key):
-        val = os.environ.get(env_var, "")
-        if val:
-            cfg[key] = val
+    return {
+        "ssh_host":     host,
+        "ssh_port":     port,
+        "ssh_username": username,
+        "ssh_key":      key,
+    }
 
 
 # ─── SSH connection ───────────────────────────────────────────────────────────
@@ -284,22 +193,18 @@ def build_ssh_command(cfg: dict) -> list[str]:
     key  = cfg.get("ssh_key", "")
 
     if not host:
-        preferred = _preferred_config_path()
         raise RuntimeError(
             "SSH host could not be determined.\n"
-            "  Fix one of the following:\n"
-            f'  1. Add "ssh_host": "gerrit.example.com" to {preferred}\n'
-            '  2. Ensure "url" is set in the config file (ssh_host is derived from it)\n'
-            "  3. Set environment variable: GERRIT_SSH_HOST=gerrit.example.com"
+            "  Set one of the following:\n"
+            "  1. export GERRIT_SSH_HOST=gerrit.example.com\n"
+            "  2. export GERRIT_URL=https://gerrit.example.com  (host is derived from it)"
         )
     if not user:
-        preferred = _preferred_config_path()
         raise RuntimeError(
             "SSH username could not be determined.\n"
-            "  Fix one of the following:\n"
-            f'  1. Add "ssh_username": "your-username" to {preferred}\n'
-            '  2. Ensure "username" is set in the config file (ssh_username defaults to it)\n'
-            "  3. Set environment variable: GERRIT_SSH_USERNAME=your-username"
+            "  Set one of the following:\n"
+            "  1. export GERRIT_SSH_USERNAME=your-username\n"
+            "  2. export GERRIT_USERNAME=your-username  (ssh username defaults to it)"
         )
 
     cmd = [
@@ -624,14 +529,14 @@ def _log_ssh_error(stderr_output: str, cfg: dict) -> None:
           or "connect to host" in stderr_lc
           or "no route to host" in stderr_lc):
         log.error("Cannot connect to %r port %s.", cfg.get("ssh_host"), cfg.get("ssh_port"))
-        log.error("Check ssh_host and ssh_port in gerrit_config.json.")
+        log.error("Check GERRIT_SSH_HOST and GERRIT_SSH_PORT environment variables.")
         log.error("Test: ssh -p %s %s@%s gerrit version",
                   cfg.get("ssh_port"), cfg.get("ssh_username"), cfg.get("ssh_host"))
     elif "not allowed" in stderr_lc or "access denied" in stderr_lc:
         log.error("This Gerrit account may lack 'Stream Events' capability.")
         log.error("Ask a Gerrit admin to grant it under Global Capabilities.")
     else:
-        log.warning("Verify gerrit_config.json: ssh_host=%r, ssh_port=%s, ssh_username=%r",
+        log.warning("Verify env vars: GERRIT_SSH_HOST=%r, GERRIT_SSH_PORT=%s, GERRIT_SSH_USERNAME=%r",
                     cfg.get("ssh_host"), cfg.get("ssh_port"), cfg.get("ssh_username"))
         log.warning("Test: ssh -p %s %s@%s gerrit version",
                     cfg.get("ssh_port"), cfg.get("ssh_username"), cfg.get("ssh_host"))
@@ -653,9 +558,7 @@ def stream_events(args: argparse.Namespace) -> int:
     """Main event streaming loop. Returns exit code."""
     _setup_logging(getattr(args, "verbose", False), args.quiet)
 
-    # Resolve workspace early so all path lookups are stable
-    ws = _workspace(getattr(args, "workspace", None) or None)
-    cfg = load_config(args.config, ws)
+    cfg = _load_ssh_config(args)
 
     type_filter    = set(f.strip() for f in args.filter.split(",")  if f.strip()) if args.filter  else set()
     project_filter = set(p.strip() for p in args.project.split(",") if p.strip()) if args.project else set()
@@ -681,16 +584,15 @@ def stream_events(args: argparse.Namespace) -> int:
     if not getattr(args, "no_output", False) and args.output:
         output_path = args.output
 
-    # ── Resolve hook settings (CLI > config > env) ───────────────────────────
-    hook_url   = args.hook_url   or cfg.get("hook_url")   or os.environ.get("HOOK_URL",   "")
-    hook_token = args.hook_token or cfg.get("hook_token") or os.environ.get("HOOK_TOKEN", "")
+    # ── Resolve hook settings (CLI > env) ────────────────────────────────────
+    hook_url   = args.hook_url   or os.environ.get("GERRIT_HOOK_URL",   "")
+    hook_token = args.hook_token or os.environ.get("GERRIT_HOOK_TOKEN", "")
 
     # ── Resolve outbox path ──────────────────────────────────────────────────
     outbox_path: str | None = (
         args.outbox
-        or cfg.get("outbox_path")
-        or os.environ.get("OUTBOX_PATH", "")
-        or (str(ws / "events.outbox.jsonl") if hook_url else None)
+        or os.environ.get("GERRIT_OUTBOX_PATH", "")
+        or (str(Path.cwd() / "events.outbox.jsonl") if hook_url else None)
     ) or None
 
     if args.dry_run:
@@ -854,12 +756,15 @@ def main() -> None:
         epilog=__doc__,
         add_help=False,
     )
-    # ── Config ────────────────────────────────────────────────────────────────
-    parser.add_argument("--config", metavar="FILE", default=None,
-                        help="Config file (searches 7 default locations if omitted)")
-    parser.add_argument("--workspace", metavar="DIR", default="",
-                        help="Project workspace directory for config file search "
-                             "(overrides SKILL_WORKSPACE env var and cwd)")
+    # ── SSH connection (override env vars) ────────────────────────────────────
+    parser.add_argument("--host", metavar="HOST", default="",
+                        help="SSH hostname (overrides GERRIT_SSH_HOST / derived from GERRIT_URL)")
+    parser.add_argument("--port", metavar="PORT", type=int, default=0,
+                        help="SSH port (overrides GERRIT_SSH_PORT, default: 29418)")
+    parser.add_argument("--username", metavar="USER", default="",
+                        help="SSH username (overrides GERRIT_SSH_USERNAME / GERRIT_USERNAME)")
+    parser.add_argument("--key", metavar="PATH", default="",
+                        help="SSH private key path (overrides GERRIT_SSH_KEY)")
     # ── Filtering ─────────────────────────────────────────────────────────────
     parser.add_argument("--filter",  metavar="TYPES", default="",
                         help="Comma-separated event types to include (default: all)")

@@ -2,7 +2,7 @@
 name: atlassian-jira-confluence
 description: "Use this skill whenever the user wants to interact with Jira or Confluence. This includes creating, reading, updating, or deleting Jira issues, projects, sprints, boards, components, versions, attachments, comments, worklogs, users, groups, or permissions. Also use for any Confluence operation: pages, spaces, labels, attachments, templates, whiteboards, comments, search (CQL), or space permissions. Trigger on phrases like 'create a Jira issue', 'update Confluence page', 'search issues with JQL', 'add comment to ticket', 'get sprint info', 'list Confluence spaces', 'export page as PDF', or any request involving Atlassian tools. Always invoke this skill before answering Jira or Confluence questions, even if the user does not explicitly say 'use the skill'."
 dependencies:
-  - t2-config
+  - pip: atlassian-python-api
 ---
 
 # Atlassian Jira & Confluence Skill
@@ -28,23 +28,22 @@ pip install atlassian-python-api
 
 It's safe to run multiple times.
 
-### Step 2 — Configure Credentials (via t2-config)
-
-> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
+### Step 2 — Set Environment Variables
 
 ```bash
-python3 scripts/t2_config.py set atlassian/url       "https://yourcompany.atlassian.net"
-python3 scripts/t2_config.py set atlassian/username  "your@email.com"
-python3 scripts/t2_config.py set atlassian/api_token "your-api-token"
+export ATLASSIAN_URL="https://yourcompany.atlassian.net"
+export ATLASSIAN_USERNAME="your@email.com"
+export ATLASSIAN_API_TOKEN="your-api-token"
 ```
 
-> **Note:** `username` is only required for Atlassian Cloud (`.atlassian.net` URLs).
->
-> **Tokens:** Generate at Jira/Confluence → Profile → Personal Access Tokens (Data Center), or Atlassian account settings → API tokens (Cloud).
+> **API Token:** Generate at https://id.atlassian.com/manage-profile/security/api-tokens
+> **Note:** `ATLASSIAN_USERNAME` is only required for Atlassian Cloud.
 
-Add to `.gitignore`:
-```
-config/atlassian.json
+Windows PowerShell:
+```powershell
+$env:ATLASSIAN_URL = "https://yourcompany.atlassian.net"
+$env:ATLASSIAN_USERNAME = "your@email.com"
+$env:ATLASSIAN_API_TOKEN = "your-api-token"
 ```
 
 ### Step 3 — Test the Connection
@@ -52,7 +51,6 @@ config/atlassian.json
 ```python
 # Save as test_connection.py and run: python test_connection.py
 import sys, os
-sys.path.insert(0, os.environ.get("SKILL_WORKSPACE", "."))
 from atlassian import Jira
 
 # (paste get_jira() helper below here, or copy from the Initialize Clients section)
@@ -83,8 +81,7 @@ print(jira.myself())
 
 ### Workflow A — Triage / Update a Jira Issue (Step-by-Step Checklist)
 
-- [ ] 1. Set workspace: `export SKILL_WORKSPACE="$(pwd)"`
-- [ ] 2. Install SDK if needed: `pip install atlassian-python-api`
+- [ ] 1. Install SDK if needed: `pip install atlassian-python-api`
 - [ ] 3. Copy the **Initialize Clients** code block below into your script
 - [ ] 4. Search for issues:
   ```python
@@ -114,8 +111,7 @@ print(jira.myself())
 
 ### Workflow B — Create / Update a Confluence Page (Step-by-Step Checklist)
 
-- [ ] 1. Set workspace: `export SKILL_WORKSPACE="$(pwd)"`
-- [ ] 2. Copy the **Initialize Clients** code block below into your script
+- [ ] 1. Copy the **Initialize Clients** code block below into your script
 - [ ] 3. Find the target space key (list all spaces):
   ```python
   spaces = confluence.get_all_spaces(start=0, limit=50)
@@ -154,77 +150,26 @@ Always use this code block so config-file priority is respected automatically.
 
 ```python
 import os
-import json
 from pathlib import Path
 from atlassian import Jira, Confluence
 
 
-_SKILL_NAME = "atlassian-jira-confluence"
-_CONFIG_FILENAME = ".atlassian.json"
-
-
-def _workspace() -> Path:
-    """Return the agent's project workspace directory (for config / output files).
-
-    Reads SKILL_WORKSPACE env var first — stays correct even when the calling
-    process cd's into subdirectories mid-session.
-    Falls back to cwd() for backward compatibility.
-    """
-    ws = os.environ.get("SKILL_WORKSPACE", "").strip()
-    return Path(ws).resolve() if ws else Path(os.getcwd())
-
-
-def _skill_dir() -> Path:
-    """Return this skill's installation directory (for own scripts / assets).
-
-    Derives from __file__ location (works when code runs from .agents/skills/atlassian-jira-confluence/).
-    """
-    return Path(__file__).resolve().parent
-
-
 def load_config() -> dict:
-    """Return credentials dict from the first config file found, or {}.
+    """Return credentials from environment variables.
 
-    Search priority follows skill-guide Rule 3 (config file search order):
-      1. ${CFG_DIR}/atlassian.json                                  ← preferred (t2-config)
-      2. {workspace}/config/atlassian-jira-confluence/.atlassian.json
-      3. {workspace}/config/.atlassian.json
-      4. {workspace}/.atlassian.json
-      5. $HOME/.config/atlassian-jira-confluence/.atlassian.json
-      6. $HOME/.config/.atlassian.json
-      7. $HOME/.atlassian.json
-
-    If config is not loaded, see skill-guide Error 2.
-    {workspace} = SKILL_WORKSPACE env var, or cwd when the script was started.
+    Required:
+      ATLASSIAN_URL        — base URL
+      ATLASSIAN_API_TOKEN  — API token
+      ATLASSIAN_USERNAME   — account email (Cloud only)
     """
-    workspace = _workspace()
-    home = Path.home()
-
-    # Priority 1: ${CFG_DIR}/atlassian.json (t2-config)
-    cfg_dir = os.environ.get("CFG_DIR", "").strip()
-    if cfg_dir:
-        p = Path(cfg_dir) / "atlassian.json"
-        if p.is_file():
-            with open(p) as fh:
-                return json.load(fh)
-
-    candidates = [
-        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
-        workspace / "config" / _CONFIG_FILENAME,
-        workspace / _CONFIG_FILENAME,
-        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
-        home / ".config" / _CONFIG_FILENAME,
-        home / _CONFIG_FILENAME,
-    ]
-    for path in candidates:
-        if path.is_file():
-            with open(path) as fh:
-                return json.load(fh)
-    return {}
-
-
-def _preferred_config_path() -> str:
-    return str(_workspace() / "config" / _SKILL_NAME / _CONFIG_FILENAME)
+    url      = os.environ.get("ATLASSIAN_URL", "").strip().rstrip("/")
+    token    = os.environ.get("ATLASSIAN_API_TOKEN", "").strip()
+    username = os.environ.get("ATLASSIAN_USERNAME", "").strip()
+    if not url:
+        raise RuntimeError("ATLASSIAN_URL is not set")
+    if not token:
+        raise RuntimeError("ATLASSIAN_API_TOKEN is not set")
+    return {"url": url, "token": token, "username": username}
 
 
 def is_cloud(url: str) -> bool:
@@ -232,15 +177,14 @@ def is_cloud(url: str) -> bool:
 
 
 def get_jira():
-    cfg = load_config().get("jira", {})
-    url      = cfg.get("url")      or os.environ.get("JIRA_URL", "")
-    token    = cfg.get("token")    or os.environ.get("JIRA_PAT_TOKEN", "")
-    username = cfg.get("username") or os.environ.get("JIRA_USERNAME", "")
+    cfg = load_config()
+    url      = cfg["url"]
+    token    = cfg["token"]
+    username = cfg.get("username", "")
     if not url or not token:
         raise EnvironmentError(
             "Jira credentials missing.\n"
-            f"  Config file : create {_preferred_config_path()} with 'jira.url' and 'jira.token'\n"
-            "  Env vars    : set JIRA_URL and JIRA_PAT_TOKEN"
+            "  Set ATLASSIAN_URL and ATLASSIAN_API_TOKEN environment variables."
         )
     if is_cloud(url):
         return Jira(url=url, username=username, password=token, cloud=True)
@@ -248,15 +192,14 @@ def get_jira():
 
 
 def get_confluence():
-    cfg = load_config().get("confluence", {})
-    url      = cfg.get("url")      or os.environ.get("CONFLUENCE_URL", "")
-    token    = cfg.get("token")    or os.environ.get("CONFLUENCE_PAT_TOKEN", "")
-    username = cfg.get("username") or os.environ.get("CONFLUENCE_USERNAME", "")
+    cfg = load_config()
+    url      = cfg["url"]
+    token    = cfg["token"]
+    username = cfg.get("username", "")
     if not url or not token:
         raise EnvironmentError(
             "Confluence credentials missing.\n"
-            f"  Config file : create {_preferred_config_path()} with 'confluence.url' and 'confluence.token'\n"
-            "  Env vars    : set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN"
+            "  Set ATLASSIAN_URL and ATLASSIAN_API_TOKEN environment variables."
         )
     if is_cloud(url):
         return Confluence(url=url, username=username, password=token, cloud=True)
@@ -267,32 +210,19 @@ def get_confluence():
 
 ## Configuration Reference
 
-### Config File Search Order (Highest Priority First)
+### Config Reference
 
-| Priority | Path | Notes |
+| Env var | Required | Description |
 |---|---|---|
-| 1 ✅ preferred | `${CFG_DIR}/atlassian.json` | Set via t2-config |
-| 2 | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` | Legacy |
-| 3 | `{workspace}/config/.atlassian.json` | Legacy |
-| 4 | `{workspace}/.atlassian.json` | Legacy |
-| 5 | `$HOME/.config/atlassian-jira-confluence/.atlassian.json` | Per-user |
-| 6 | `$HOME/.config/.atlassian.json` | |
-| 7 | `$HOME/.atlassian.json` | |
+| `ATLASSIAN_URL` | ✅ | e.g. `https://yourcompany.atlassian.net` |
+| `ATLASSIAN_USERNAME` | ✅ for Cloud | Atlassian account email |
+| `ATLASSIAN_API_TOKEN` | ✅ | API token (from https://id.atlassian.com/manage-profile/security/api-tokens) |
 
-`{workspace}` = value of `SKILL_WORKSPACE` env var, or `cwd()` at script start.
-
-### Environment Variables (fallback when no config file)
-
+Set env vars:
 ```bash
-# Confluence
-export CONFLUENCE_URL=https://your-confluence.example.com
-export CONFLUENCE_PAT_TOKEN=your-pat-token
-export CONFLUENCE_USERNAME=you@example.com   # Cloud only
-
-# Jira
-export JIRA_URL=https://your-jira.example.com
-export JIRA_PAT_TOKEN=your-pat-token
-export JIRA_USERNAME=you@example.com          # Cloud only
+export ATLASSIAN_URL="https://yourcompany.atlassian.net"
+export ATLASSIAN_USERNAME="your@email.com"
+export ATLASSIAN_API_TOKEN="your-api-token"
 ```
 
 Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
@@ -301,7 +231,7 @@ Windows CMD: `set VAR=value` | PowerShell: `$env:VAR = "value"`
 
 ## Execution Rules (Important for All Models)
 
-1. **Always call `load_config()` at the start** — it automatically checks all 7 config paths.
+1. **Always call `load_config()` at the start** — it reads from environment variables.
 
 2. **Handle errors gracefully:**
    ```python
@@ -413,10 +343,9 @@ for item in results.get("results", []):
 
 ### 明确禁止的操作
 
-- ⛔ **禁止硬编码 `url`, `username`, `api_token`**：必须从配置文件或环境变量读取
-- ⛔ **禁止将 `.atlassian.json`（含 token 的配置文件）提交到 Git**：必须加入 `.gitignore`
+- ⛔ **禁止硬编码 `url`, `username`, `api_token`**：必须从环境变量读取
 - ⛔ **禁止在日志/输出中打印 `api_token` 或 `password`**：不论任何错误情况
-- ⛔ **禁止在没有 `.atlassian.json` 或环境变量时静默使用空凭据运行**：必须 exit 1 并提示配置
+- ⛔ **禁止在没有环境变量时静默使用空凭据运行**：必须 exit 1 并提示配置
 - ⛔ **禁止 `delete` 操作不经用户确认**：删除 Jira issue、Confluence page、space 前必须在报告中列明将要删除的内容，等待用户确认
 
 ### 边界条件

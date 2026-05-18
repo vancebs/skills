@@ -128,7 +128,7 @@ export KNOWLEDGE_BASE_DIR="/path/to/your/knowledge-base"
 
 **`KNOWLEDGE_BASE_DIR` 设置规则：**
 - 必须为绝对路径，正则：`^/` (Linux/macOS) 或 `^[A-Za-z]:\\` (Windows)
-- 推荐放在项目 workspace 下：`{SKILL_WORKSPACE}/knowledge-base`
+- 推荐放在项目 workspace 下：`./knowledge-base`
 - 设置后整个会话不得修改
 
 ---

@@ -15,23 +15,15 @@
 
 ```bash
 # 1. 环境检查
-python3 "$SKILL_DIR/scripts/check_env.py"
+python3 scripts/check_env.py
 
-# 2. 创建配置
-mkdir -p "$SKILL_WORKSPACE/config/code-review"
-cp "$SKILL_DIR/scripts/config.json.example" \
-   "$SKILL_WORKSPACE/config/code-review/code_review_config.json"
-# 编辑配置文件，填写 Gerrit url / username / password
+# 2. 设置 Gerrit 环境变量
+export GERRIT_URL="https://gerrit.example.com"
+export GERRIT_USERNAME="john.doe"
+export GERRIT_HTTP_PASSWORD="your-http-token"
 
-# 3. 获取 patch
-python3 "$SKILL_DIR/scripts/fetch_patch.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --url "https://gerrit.example.com/c/project/+/12345"
-
-# 4. 审查后提交结果
-python3 "$SKILL_DIR/scripts/post_result.py" \
-  --workspace "$SKILL_WORKSPACE" \
-  --change-id 12345 --result PASS --report "审查通过"
+# 3. 执行审查（触发词：Gerrit URL / change number / Change-Id）
+# Agent 收到变更信息后自动触发 SKILL.md 中的工作流
 ```
 
 详细说明见 [SKILL.md](SKILL.md)。

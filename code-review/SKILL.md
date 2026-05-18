@@ -7,10 +7,8 @@ description: >
   T2MCodingRule, and posts results back to Gerrit via gerrit-api. No event
   listener or cron job — triggered on demand.
 dependencies:
-  - gerrit-api     (required — all Gerrit operations)
-  - T2MCodingRule  (required — review standards)
-  - t2-config      (for code-review config)
-  - skill-guide    (recommended — path and environment guidance)
+  - skill: gerrit-api
+  - skill: T2MCodingRule
 compatibility: Requires python3 (≥3.9). Python stdlib only — no pip needed.
 keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
 ---
@@ -42,44 +40,39 @@ keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
 python3 scripts/check_env.py
 ```
 
-脚本检查：Python 版本、gerrit-api 已安装、code-review 配置文件存在。
+脚本检查：Python 版本、gerrit-api 已安装、T2MCodingRule 已安装、Gerrit 环境变量已设置。
 
-**如果 gerrit-api 未安装，脚本会输出安装命令：**
+**如果 gerrit-api 或 T2MCodingRule 未安装，脚本会输出安装命令：**
 ```
 ❌ gerrit-api skill 未安装（必须安装）
    安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api
-```
-
-安装后，运行 gerrit-api 的环境检查（配置 Gerrit 连接）：
-```bash
-python3 scripts/check_env.py
+❌ T2MCodingRule skill 未安装（必须安装）
+   安装命令: npx skills add https://github.com/vancebs/skills --skill T2MCodingRule
 ```
 
 ---
 
-## Step 2 — Configure code-review (via t2-config)
-
-> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
+## Step 2 — Set Environment Variables (optional)
 
 ```bash
-python3 scripts/t2_config.py set code-review/test_mode true
-# Optionally add file patterns to skip:
-# python3 scripts/t2_config.py set code-review/skip_file_patterns '["*.min.js","*.generated.*"]'
-```
-
-> ⚠️ **Gerrit 连接配置（host/username/password）在 gerrit-api skill 中管理，不在此处配置。**
-
-Add to `.gitignore`:
-```
-config/code-review.json
+# Default: test_mode=true (print report only, no Gerrit posting)
+export CODE_REVIEW_TEST_MODE=false      # set to false to post to Gerrit
+export CODE_REVIEW_SKIP_PATTERNS="*.min.js,*.generated.*"  # comma-separated globs
 ```
 
 **配置字段说明：**
 
-| 字段 | 必填 | 默认值 | 说明 |
+| 环境变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `test_mode` | ❌ | `true` | `true` = 仅打印报告，不写 Gerrit；`false` = 发布 comment + Verified 标签 |
-| `skip_file_patterns` | ❌ | `[]` | 跳过的文件 glob，如 `["*.md", "*.xml", "*.json"]` |
+| `CODE_REVIEW_TEST_MODE` | ❌ | `true` | `true` = 仅打印报告，不写 Gerrit；`false` = 发布 comment + Verified 标签 |
+| `CODE_REVIEW_SKIP_PATTERNS` | ❌ | — | 跳过的文件 glob，逗号分隔，如 `*.md,*.xml,*.json` |
+
+### Dependencies
+
+| Dependency | Type | Install |
+|---|---|---|
+| `gerrit-api` | skill | `npx skills add https://github.com/vancebs/skills --skill gerrit-api` |
+| `T2MCodingRule` | skill | `npx skills add https://github.com/vancebs/skills --skill T2MCodingRule` |
 
 ---
 
@@ -295,13 +288,13 @@ Code Review 报告
 
 ### 阶段四 — 发布结果
 
-读取 code-review 配置文件中的 `test_mode` 值（默认 `true`）：
+读取 `CODE_REVIEW_TEST_MODE` 环境变量（默认 `true`）：
 
-#### 4A — test_mode = true（默认）
+#### 4A — CODE_REVIEW_TEST_MODE = true（默认）
 
 直接将报告打印到当前会话，**不操作 Gerrit**。
 
-#### 4B — test_mode = false
+#### 4B — CODE_REVIEW_TEST_MODE = false
 
 用 gerrit-api 发布 review comment 并设置 Verified 标签：
 
@@ -382,6 +375,8 @@ python scripts\gerrit_api.py review <change_number> current $body
 | current_revision 在 `get-change` 和 `review` 之间发生变化（新 patchset 上传） | 时序竞争 | `review` 使用 `current` 关键字（不固定 revision），gerrit-api 自动指向当前最新 patchset |
 | `review` 返回 HTTP 5xx 或网络超时 | gerrit 服务端故障 | 最多重试 2 次，超限后输出错误，**不**标记 Verified |
 | gerrit-api skill 未安装 | 依赖缺失 | 停止并输出：`❌ 需要 gerrit-api skill。安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api` |
+| T2MCodingRule skill 未安装 | 依赖缺失 | 停止并输出：`❌ 需要 T2MCodingRule skill。安装命令: npx skills add https://github.com/vancebs/skills --skill T2MCodingRule` |
+| Gerrit 环境变量未设置 | `GERRIT_URL`/`GERRIT_USERNAME`/`GERRIT_HTTP_PASSWORD` 未配置 | 运行 `check_env.py` 查看哪些变量缺失 |
 
 ### 明确禁止的操作
 
@@ -401,21 +396,14 @@ python scripts\gerrit_api.py review <change_number> current $body
 
 ## 配置参考
 
-### code-review 配置文件搜索路径
+### Config Reference
 
-> 此顺序遵循 **skill-guide 规范 3**（配置文件搜索顺序）。若配置文件未被加载，参见 skill-guide 错误 2。
+| 环境变量 | 必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `CODE_REVIEW_TEST_MODE` | ❌ | `true` | `true` = 仅打印报告；`false` = 发布到 Gerrit |
+| `CODE_REVIEW_SKIP_PATTERNS` | ❌ | — | 逗号分隔的文件 glob，如 `*.md,*.json` |
 
-| 优先级 | 路径 |
-|---|---|
-| 1 ✅ 推荐 | `{workspace}/config/code-review/code_review_config.json` |
-| 2 | `{workspace}/config/code_review_config.json` |
-| 3 | `{workspace}/code_review_config.json` |
-| 4 | `{skill-dir}/code_review_config.json` |
-| 5 | `$HOME/.config/code-review/code_review_config.json` |
-| 6 | `$HOME/.config/code_review_config.json` |
-| 7 | `$HOME/code_review_config.json` |
-
-> Gerrit 连接配置（host/username/password）在 **gerrit-api** skill 的配置文件中管理。
+> Gerrit 连接配置（`GERRIT_URL`/`GERRIT_USERNAME`/`GERRIT_HTTP_PASSWORD`）在 **gerrit-api** skill 中管理。
 
 ---
 
@@ -425,7 +413,6 @@ python scripts\gerrit_api.py review <change_number> current $body
 |---|---|---|
 | `gerrit-api` | **必须** | 所有 Gerrit 操作（get-change/list-files/get-diff/review）均通过它完成 |
 | `T2MCodingRule` | **必须** | 提供审查规范 |
-| `agent-code-review` | 互补 | `agent-code-review` 自带轮询；本 skill 专注按需单次审查 |
 | `skill-guide` | 建议安装 | 解决路径和环境问题 |
 
 ---
@@ -437,6 +424,5 @@ code-review/
 ├── SKILL.md
 ├── README.md
 └── scripts/
-    ├── check_env.py          ← 环境检查（验证 gerrit-api 已安装）
-    └── config.json.example  ← 审查行为配置模板（无 Gerrit 连接配置）
+    └── check_env.py          ← 环境检查（验证 gerrit-api、T2MCodingRule 已安装，Gerrit 环境变量已设置）
 ```
