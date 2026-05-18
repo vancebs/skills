@@ -18,7 +18,7 @@ DIRS_WITH_DESC = {
     "coding-standards": "编码规范和最佳实践",
     "troubleshooting": "常见问题和解决方案",
     "release-notes": "版本发布记录",
-    "code-review": "Code Review 记录和重要决策",
+    "code-review": "存档 code review 报告（每次审查生成一份，命名格式 YYYY-MM-DD_<change>.md）",
     "temp": "Agent 之间临时文件分享（读取后请删除）",
     "onboarding": "新成员入职指南、环境搭建说明",
 }
@@ -39,6 +39,25 @@ README_TEMPLATE = """\
 - 包含足够的关键词便于 `memory_search` 语义检索
 - 代码片段使用 fenced code block
 - 单文件大小 ≤ 1 MB
+"""
+
+CODE_REVIEW_README = """\
+# code-review — Code Review 报告归档
+
+此目录用于存档每次 code review 的完整报告。
+
+## 文件命名格式
+
+`YYYY-MM-DD_<change>.md`，其中 `<change>` 为 Gerrit change number。
+
+示例：`2026-05-18_12345.md`
+
+## 使用规则
+
+- 每次 code review 完成后，将完整报告以上述命名格式写入本目录
+- 报告内容包含：变更信息、审查结果（PASS/FAIL）、问题列表
+- 文件第一行必须为 `# 标题`（H1）
+- 不得在此目录存放非 code review 相关文档
 """
 
 TEMP_README = """\
@@ -107,6 +126,8 @@ for dirname, desc in DIRS_WITH_DESC.items():
     if not readme.exists():
         if dirname == "temp":
             content = TEMP_README
+        elif dirname == "code-review":
+            content = CODE_REVIEW_README
         else:
             title = dirname.replace("-", " ").title()
             content = README_TEMPLATE.format(title=title, desc=desc)

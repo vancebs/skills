@@ -62,6 +62,12 @@ def _find_config(ws, override=None):
     if override:
         p = Path(override)
         return p if p.is_file() else None
+    # Priority 1: ${CFG_DIR}/agent-code-review.json (t2-config)
+    cfg_dir = os.environ.get("CFG_DIR", "").strip()
+    if cfg_dir:
+        p = Path(cfg_dir) / "agent-code-review.json"
+        if p.is_file():
+            return p
     sd   = _skill_dir()
     home = Path.home()
     for p in [

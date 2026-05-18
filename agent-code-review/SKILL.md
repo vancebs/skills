@@ -8,6 +8,7 @@ description: >
   results; set test_mode=false to write to Gerrit.
 dependencies:
   - T2MCodingRule
+  - t2-config
 compatibility: Requires python3 (≥3.9) and ssh. Python stdlib only — no pip needed.
 ---
 
@@ -25,26 +26,12 @@ compatibility: Requires python3 (≥3.9) and ssh. Python stdlib only — no pip 
 
 ---
 
-## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
-
-```bash
-# Linux / macOS
-export SKILL_WORKSPACE="$(pwd)"
-export SKILL_DIR=$(python3 -c "
-import os, sys; from pathlib import Path; n='agent-code-review'
-ws=Path(os.environ.get('SKILL_WORKSPACE',os.getcwd()))
-[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
-sys.exit(1)") || echo "❌ agent-code-review not found: npx skills add https://github.com/vancebs/skills --skill agent-code-review"
-```
-
-> **Windows PowerShell 版本 / SKILL_DIR 设置问题：** 参见 **skill-guide Step 2**。
-
----
+> **路径约定**: 以下所有 `scripts/...` 路径均相对于本 Skill 目录（`.agents/skills/agent-code-review/`）。
 
 ## Step 1 — 环境检查（首次加载 skill 时运行一次）
 
 ```bash
-python3 "$SKILL_DIR/scripts/check_env.py"
+python3 scripts/check_env.py
 ```
 
 脚本会逐项检查：Python 版本、SSH 命令、配置文件、Gerrit REST 连接、SSH 连接、Workspace 写权限。
@@ -52,60 +39,30 @@ python3 "$SKILL_DIR/scripts/check_env.py"
 
 ---
 
-## Step 2 — 创建配置文件（一次性）
+## Step 2 — Configure (via t2-config)
+
+> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
 
 ```bash
-# Linux / macOS
-mkdir -p "$SKILL_WORKSPACE/config/agent-code-review"
-cp "$SKILL_DIR/scripts/config.json.example" \
-   "$SKILL_WORKSPACE/config/agent-code-review/code_review_config.json"
-# 然后编辑填写真实值
+python3 scripts/t2_config.py set agent-code-review/test_mode true
+python3 scripts/t2_config.py set agent-code-review/test_channel "your-slack-channel-or-conversation-id"
+# For production (no test mode):
+# python3 scripts/t2_config.py set agent-code-review/test_mode false
 ```
 
-```batch
-:: Windows CMD
-mkdir "%SKILL_WORKSPACE%\config\agent-code-review"
-copy "%SKILL_DIR%\scripts\config.json.example" ^
-     "%SKILL_WORKSPACE%\config\agent-code-review\code_review_config.json"
+> Gerrit 连接配置（url/username/password/ssh）在 **gerrit-api** skill 中管理（见 gerrit-api Step 2）。
+
+Add to `.gitignore`:
+```
+config/agent-code-review.json
 ```
 
-**配置文件内容说明：**
-
-```json
-{
-  "url":          "https://gerrit.example.com",
-  "username":     "john.doe",
-  "password":     "http-credentials-token",
-  "ssh_host":     "",
-  "ssh_port":     29418,
-  "ssh_username": "",
-  "ssh_key":      "",
-  "test_mode":          true,
-  "events_file":        "",
-  "review_projects":    [],
-  "review_branches":    [],
-  "skip_file_patterns": []
-}
-```
+**配置字段说明：**
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
-| `url` | — | Gerrit 地址（必填） |
-| `username` | — | Gerrit 用户名（必填） |
-| `password` | — | HTTP Credentials token（必填）<br>生成：Gerrit → Settings → HTTP Credentials → Generate Password |
-| `ssh_host` | 从 `url` 提取 | SSH 主机名（通常不需填） |
-| `ssh_port` | `29418` | SSH 端口 |
-| `ssh_username` | 同 `username` | SSH 用户名（通常不需填） |
-| `ssh_key` | 自动检测 `~/.ssh/` | SSH 私钥路径 |
 | `test_mode` | `true` | **true** = 仅输出报告，不写 Gerrit；**false** = 发布到 Gerrit |
-| `events_file` | `{workspace}/events.jsonl` | 事件队列文件（留空用默认） |
-| `review_projects` | `[]`（全部） | 只审查指定项目（空 = 全部） |
-| `review_branches` | `[]`（全部） | 只审查指定分支（空 = 全部） |
-| `skip_file_patterns` | `[]` | 跳过匹配此 glob 的文件，如 `["*.md","*.xml"]` |
-
-> ⚠️ 将配置文件加入 `.gitignore`：`config/agent-code-review/code_review_config.json`
->
-> ⚠️ SSH 公钥必须上传到 Gerrit：Settings → SSH Keys → Add Key
+| `test_channel` | — | 测试模式下的通知目标（可选） |
 
 重新运行 `check_env.py` 确认所有项 ✅ 后继续。
 
@@ -123,7 +80,7 @@ Cron job 每 1 分钟触发一次，执行"工作流"（见下方）。
 执行 agent-code-review 工作流：
 
 1. 运行以下命令并读取输出：
-   python3 "$SKILL_DIR/scripts/review_job.py" --workspace "$SKILL_WORKSPACE"
+   python3 scripts/review_job.py
 
 2. 解析 JSON 输出：
    - 如果 status == "error"：输出错误信息，停止本次执行
@@ -131,15 +88,13 @@ Cron job 每 1 分钟触发一次，执行"工作流"（见下方）。
    - 如果 events_count > 0：对每个 event 执行 Code Review（见下方工作流）
 
 3. 对每个 event，完成 Code Review 后运行：
-   python3 "$SKILL_DIR/scripts/post_result.py" \
-     --workspace "$SKILL_WORKSPACE" \
+   python3 scripts/post_result.py \
      --change-id {event.change_id} \
      --revision {event.revision} \
      --result {PASS 或 FAIL} \
      --report "{review 报告文本}"
 
 注意：
-- SKILL_WORKSPACE 和 SKILL_DIR 必须在会话开始时设置（Step 0）
 - 加载 T2MCodingRule skill 以获取编码规范
 ```
 
@@ -150,7 +105,7 @@ Cron job 每 1 分钟触发一次，执行"工作流"（见下方）。
 **手动触发：** 每次 Gerrit 有新提交时，运行以下命令并按"工作流"处理输出：
 
 ```bash
-python3 "$SKILL_DIR/scripts/review_job.py" --workspace "$SKILL_WORKSPACE"
+python3 scripts/review_job.py
 ```
 
 **后台轮询（Python）：** 将以下脚本保存为 `poller.py` 并在后台运行：
@@ -158,12 +113,11 @@ python3 "$SKILL_DIR/scripts/review_job.py" --workspace "$SKILL_WORKSPACE"
 ```python
 # poller.py — 每分钟检查一次，输出供 agent 处理
 import time, subprocess, sys, os
-skill_dir = os.environ.get("SKILL_DIR", "")
-workspace = os.environ.get("SKILL_WORKSPACE", os.getcwd())
+from pathlib import Path
+skill_dir = Path(__file__).resolve().parent.parent  # skill root
 while True:
     result = subprocess.run(
-        [sys.executable, f"{skill_dir}/scripts/review_job.py",
-         "--workspace", workspace],
+        [sys.executable, str(skill_dir / "scripts" / "review_job.py")],
         capture_output=True, text=True
     )
     if result.stdout.strip():
@@ -178,7 +132,7 @@ while True:
 ### 阶段一 — 运行主任务脚本
 
 ```bash
-python3 "$SKILL_DIR/scripts/review_job.py" --workspace "$SKILL_WORKSPACE"
+python3 scripts/review_job.py
 ```
 
 **脚本内部自动完成：**
@@ -297,8 +251,7 @@ Code Review 报告
 ### 阶段三 — 提交结果
 
 ```bash
-python3 "$SKILL_DIR/scripts/post_result.py" \
-  --workspace "$SKILL_WORKSPACE" \
+python3 scripts/post_result.py \
   --change-id {change_id} \
   --revision  {revision} \
   --result    {PASS 或 FAIL} \
@@ -308,16 +261,19 @@ python3 "$SKILL_DIR/scripts/post_result.py" \
 **或通过文件传入报告（报告较长时推荐）：**
 
 ```bash
-# 将报告写入临时文件
-cat > /tmp/review_report.txt << 'REPORT'
+# 将报告保存到文件
+python3 -c "
+report = '''
 {报告内容}
-REPORT
+'''.strip()
+with open('review_report.txt', 'w') as f:
+    f.write(report)
+"
 
-python3 "$SKILL_DIR/scripts/post_result.py" \
-  --workspace "$SKILL_WORKSPACE" \
+python3 scripts/post_result.py \
   --change-id {change_id} \
   --result    {PASS 或 FAIL} \
-  --report-file /tmp/review_report.txt
+  --report-file review_report.txt
 ```
 
 **退出码说明：**
@@ -366,7 +322,7 @@ python3 "$SKILL_DIR/scripts/post_result.py" \
 | post_result.py 退出码 2 | test_mode=true | 配置改为 false 或加 --force |
 | post_result.py HTTP 403 | 账号无 Verified 投票权限 | 请 Gerrit 管理员授权 |
 | post_result.py HTTP 401 | password 配置错误 | 重新生成 HTTP Credentials |
-| 配置文件未找到 | SKILL_WORKSPACE 未设置？ | 重新执行 Step 0，重新运行 check_env.py |
+| 配置文件未找到 | CFG_DIR 未设置？ | 设置 CFG_DIR 并重新运行 check_env.py |
 
 ---
 
@@ -377,7 +333,7 @@ python3 "$SKILL_DIR/scripts/post_result.py" \
 | 场景 | 原因 | 处理动作 |
 |---|---|---|
 | `review_job.py` 输出 `status: error` | 脚本内部错误（配置缺失、连接失败等）| 停止本次 cron 执行，将 `message` 字段内容告知用户 |
-| `events_count: 0` 连续出现 ≥ 3 次 | 监听进程可能已停止或无新事件 | 运行 `python3 "$SKILL_DIR/scripts/check_env.py"` 排查；不得将空结果判定为 PASS |
+| `events_count: 0` 连续出现 ≥ 3 次 | 监听进程可能已停止或无新事件 | 运行 `python3 scripts/check_env.py` 排查；不得将空结果判定为 PASS |
 | `listener_status: start_failed` | SSH 配置错误或密钥未授权 | 停止 cron，提示用户按 Step 1 检查 SSH 配置；不自动重试超过 3 次 |
 | `post_result.py` HTTP 403 持续失败 | 账号无 Verified 投票权限 | 停止执行，不自动重试；提示联系 Gerrit 管理员 |
 | 事件 JSON 结构不符合预期字段 | Gerrit 版本差异或事件类型不同 | 跳过该事件，记录 WARNING，不报 FAIL |
@@ -387,7 +343,7 @@ python3 "$SKILL_DIR/scripts/post_result.py" \
 
 - ⛔ **禁止在 `test_mode: false` 时对同一 change+patchset 重复发布 Verified 标签**：会产生重复投票
 - ⛔ **禁止在 `check_env.py` 失败时继续运行主任务**：缺少必要配置时行为不可预期
-- ⛔ **禁止将 `code_review_config.json`（含密码字段）提交到 Git**
+- ⛔ **禁止将含密码字段的配置文件提交到 Git**：务必将 `config/` 目录加入 `.gitignore`
 - ⛔ **禁止并发运行多个 `review_job.py` 实例指向同一 `events.jsonl`**：光标文件不支持并发读
 
 ### 边界条件

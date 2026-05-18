@@ -3,6 +3,8 @@ name: gerrit-api
 description: Interact with Gerrit Code Review via the REST API — query changes, fetch diffs, post reviews with labels and inline comments, and manage change lifecycle. Also supports real-time event streaming via SSH (stream-events).
 license: Apache-2.0
 compatibility: Requires python3 (≥3.9) and ssh. All scripts use Python stdlib only — no pip install needed.
+dependencies:
+  - t2-config
 metadata:
   based-on: https://github.com/yurnov/gerrit-in-5-min (gerrit-review skill by @yurnov)
   keywords: [gerrit, code review, code review automation, developer tools, stream-events, ssh]
@@ -18,39 +20,7 @@ metadata:
 
 ---
 
-## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
-
-> 如果遇到路径相关问题，安装 `skill-guide` 获取详细指引：`npx skills add https://github.com/vancebs/skills --skill skill-guide`
-
-### Step 0A — 记录 Workspace
-
-```bash
-# Linux / macOS / Git Bash
-export SKILL_WORKSPACE="$(pwd)"
-
-# Windows CMD
-set SKILL_WORKSPACE=%CD%
-
-# Windows PowerShell
-$env:SKILL_WORKSPACE = (Get-Location).Path
-```
-
-### Step 0B — 确认 Skill 安装目录（SKILL_DIR）
-
-```bash
-# Linux / macOS
-export SKILL_DIR=$(python3 -c "
-import os, sys; from pathlib import Path; n='gerrit-api'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
-sys.exit(1)") || echo "❌ gerrit-api not found: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
-```
-
-> 如需 Windows PowerShell 版本、验证命令，或同时使用多个 skill 时发生 `SKILL_DIR` 冲突，参见：
-> - **skill-guide Step 2**（SKILL_DIR 检测完整方法）
-> - **skill-guide 错误 7**（多 skill SKILL_DIR 冲突处理）
-
----
+> **路径约定**: 以下所有 `scripts/...` 路径均相对于本 Skill 目录（`.agents/skills/gerrit-api/`）。
 
 ## ✅ Setup Checklist
 
@@ -63,48 +33,37 @@ python3 --version   # must be ≥ 3.9
 ssh -V              # must be installed (for stream-events only)
 ```
 
-### Step 2 — Create Config File
+### Step 2 — Configure Credentials (via t2-config)
+
+> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
+> Config stored at: `${CFG_DIR}/gerrit-api.json`
 
 ```bash
-# Create directory at the recommended (highest-priority) location
-mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
+# Set config (run once, values persist in ${CFG_DIR}/gerrit-api.json)
+python3 scripts/t2_config.py set gerrit-api/url       "https://gerrit.example.com"
+python3 scripts/t2_config.py set gerrit-api/username  "john.doe"
+python3 scripts/t2_config.py set gerrit-api/password  "your-http-credential-token"
 
-# Copy the template from the skill's installation directory
-cp "$SKILL_DIR/scripts/gerrit_config.json.example" \
-   "$SKILL_WORKSPACE/config/gerrit-api/gerrit_config.json"
-
-# Edit with your real credentials
+# SSH stream-events (optional)
+python3 scripts/t2_config.py set gerrit-api/ssh_host     "gerrit.example.com"
+python3 scripts/t2_config.py set gerrit-api/ssh_port     29418
+python3 scripts/t2_config.py set gerrit-api/ssh_username "john.doe"
+python3 scripts/t2_config.py set gerrit-api/ssh_key      "~/.ssh/id_rsa"
 ```
 
-Config file content:
-```json
-{
-  "url": "https://gerrit.example.com",
-  "username": "john.doe",
-  "password": "your-http-credential-token",
-  "ssh_host": "gerrit.example.com",
-  "ssh_port": 29418,
-  "ssh_username": "john.doe",
-  "ssh_key": "~/.ssh/id_rsa",
-  "hook_url": "",
-  "hook_token": "",
-  "outbox_path": ""
-}
-```
-
-> **IMPORTANT — HTTP Password:** This is NOT your Gerrit login password. Generate it at: **Gerrit web UI → Settings → HTTP Credentials → Generate Password**
+> ⚠️ **HTTP Password** ≠ Gerrit login password. Generate at: Gerrit → Settings → HTTP Credentials → Generate Password
 >
-> **IMPORTANT — SSH Key:** For stream-events, your SSH public key must be uploaded at: **Gerrit web UI → Settings → SSH Keys → Add Key**
+> ⚠️ **SSH Key** must be uploaded: Gerrit → Settings → SSH Keys → Add Key
 
 Add to `.gitignore`:
 ```
-config/gerrit-api/gerrit_config.json
+config/gerrit-api.json
 ```
 
 ### Step 3 — Test the Connection
 
 ```bash
-python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+limit:1"
+python3 scripts/gerrit_api.py query "status:open+limit:1"
 ```
 
 Expected: JSON output with change data. If you see an error, see **Troubleshooting** below.
@@ -121,7 +80,7 @@ Expected: `gerrit version 3.x.x`
 
 ## ⚡ Quick Reference — REST API Commands
 
-All commands follow the pattern: `python3 "$SKILL_DIR/scripts/gerrit_api.py" <command> [args]`
+All commands follow the pattern: `python3 scripts/gerrit_api.py <command> [args]`
 
 | Task | Command |
 |---|---|
@@ -152,25 +111,25 @@ Use this when you need to perform a code review on a Gerrit change.
 - [ ] 1. Record workspace: `export SKILL_WORKSPACE="$(pwd)"`
 - [ ] 2. Find changes needing review:
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open+reviewer:self+-owner:self"
+  python3 scripts/gerrit_api.py query "status:open+reviewer:self+-owner:self"
   ```
 - [ ] 3. Get the change details for change `<id>`:
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" get-change <id>
+  python3 scripts/gerrit_api.py get-change <id>
   ```
 - [ ] 4. List modified files:
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" list-files <id>
+  python3 scripts/gerrit_api.py list-files <id>
   ```
 - [ ] 5. Review each file's diff:
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" get-diff <id> "path/to/file.java"
+  python3 scripts/gerrit_api.py get-diff <id> "path/to/file.java"
   ```
 - [ ] 6. Post review (choose one option):
 
   **Option A — Inline comments + label in one call:**
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" review <id> current '{
+  python3 scripts/gerrit_api.py review <id> current '{
     "message": "Review comment here.",
     "labels": {"Code-Review": 1},
     "comments": {
@@ -184,16 +143,16 @@ Use this when you need to perform a code review on a Gerrit change.
   **Option B — Draft comments first, then publish:**
   ```bash
   # Add draft (repeat for each comment)
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" create-draft <id> current \
+  python3 scripts/gerrit_api.py create-draft <id> current \
     '{"path":"path/to/file.java","line":42,"message":"Consider a constant.","unresolved":true}'
   # Publish all drafts with a label
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" review <id> current \
+  python3 scripts/gerrit_api.py review <id> current \
     '{"message":"See inline comments.","labels":{"Code-Review":-1},"drafts":"PUBLISH"}'
   ```
 
 - [ ] 7. (Optional) Submit if approved:
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_api.py" submit <id>
+  python3 scripts/gerrit_api.py submit <id>
   ```
 
 **Label values** (project-specific, typical):
@@ -220,13 +179,13 @@ Use this when you need to react to Gerrit events in real time or collect events 
 - [ ] 2. Test SSH: `ssh -p 29418 <username>@<host> gerrit version`
 - [ ] 3. Test with dry run (no file writes, verify events arrive):
   ```bash
-  python3 "$SKILL_DIR/scripts/gerrit_stream_events.py" \
+  python3 scripts/gerrit_stream_events.py \
     --workspace "$SKILL_WORKSPACE" --dry-run --summary --max-events 5
   ```
 - [ ] 4. Start the background listener:
   ```bash
   # Write to file + auto-reconnect
-  python3 "$SKILL_DIR/scripts/gerrit_stream_events.py" \
+  python3 scripts/gerrit_stream_events.py \
     --workspace "$SKILL_WORKSPACE" \
     --output "$SKILL_WORKSPACE/events.jsonl" \
     --reconnect --quiet &
@@ -260,14 +219,12 @@ Use this when you need to react to Gerrit events in real time or collect events 
 
 ### Config File Search Order (Highest Priority First)
 
-> Follows **skill-guide Rule 3** (config file search order). If config is not being loaded, see skill-guide Error 2.
-
 | Priority | Path | Notes |
 |---|---|---|
-| 1 ✅ preferred | `{workspace}/config/gerrit-api/gerrit_config.json` | Create here |
-| 2 | `{workspace}/config/gerrit_config.json` | |
-| 3 | `{workspace}/gerrit_config.json` | |
-| 4 | `{skill-dir}/gerrit_config.json` | Dev/testing fallback |
+| 1 ✅ preferred | `${CFG_DIR}/gerrit-api.json` | Set via t2-config |
+| 2 | `{workspace}/config/gerrit-api/gerrit_config.json` | Legacy |
+| 3 | `{workspace}/config/gerrit_config.json` | Legacy |
+| 4 | `{workspace}/gerrit_config.json` | Legacy |
 | 5 | `$HOME/.config/gerrit-api/gerrit_config.json` | Per-user |
 | 6 | `$HOME/.config/gerrit_config.json` | |
 | 7 | `$HOME/gerrit_config.json` | |
@@ -439,7 +396,7 @@ Every event has these extra fields added by the script:
 | `HTTP 401 Unauthorized` | HTTP password correct? | Re-generate at Gerrit → Settings → HTTP Credentials |
 | `HTTP 404 Not Found` | Change number exists? URL has trailing slash? | Verify change number; remove trailing slash from `url` |
 | `HTTP 409 Conflict` | Trying to review a change-edit? Missing approvals for submit? | Check change status in Gerrit UI |
-| Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 "$SKILL_DIR/scripts/gerrit_api.py" help` to see search paths |
+| Config file not found | Is `SKILL_WORKSPACE` set? Is file at priority-1 path? | Run `python3 scripts/gerrit_api.py help` to see search paths |
 | SSH auth fails | SSH key uploaded to Gerrit? Right user/port? | Run `ssh -p 29418 <user>@<host> gerrit version` to test |
 | SSH "access denied" | Account lacks Stream Events capability | Ask Gerrit admin to grant under Global Capabilities |
 

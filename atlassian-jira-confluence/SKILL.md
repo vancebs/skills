@@ -1,6 +1,8 @@
 ---
 name: atlassian-jira-confluence
 description: "Use this skill whenever the user wants to interact with Jira or Confluence. This includes creating, reading, updating, or deleting Jira issues, projects, sprints, boards, components, versions, attachments, comments, worklogs, users, groups, or permissions. Also use for any Confluence operation: pages, spaces, labels, attachments, templates, whiteboards, comments, search (CQL), or space permissions. Trigger on phrases like 'create a Jira issue', 'update Confluence page', 'search issues with JQL', 'add comment to ticket', 'get sprint info', 'list Confluence spaces', 'export page as PDF', or any request involving Atlassian tools. Always invoke this skill before answering Jira or Confluence questions, even if the user does not explicitly say 'use the skill'."
+dependencies:
+  - t2-config
 ---
 
 # Atlassian Jira & Confluence Skill
@@ -11,29 +13,7 @@ description: "Use this skill whenever the user wants to interact with Jira or Co
 
 ---
 
-## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
-
-> 如果遇到路径相关问题，安装 `skill-guide` 获取详细指引：`npx skills add https://github.com/vancebs/skills --skill skill-guide`
-
-### Step 0A — 记录 Workspace
-
-```bash
-# Linux / macOS / Git Bash
-export SKILL_WORKSPACE="$(pwd)"
-
-# Windows CMD
-set SKILL_WORKSPACE=%CD%
-
-# Windows PowerShell
-$env:SKILL_WORKSPACE = (Get-Location).Path
-```
-
-### Step 0B — 确认 Skill 安装目录（SKILL_DIR，可选）
-
-> 本 skill 通过 copy-paste 代码片段使用，不直接调用 skill 内脚本，`SKILL_DIR` 仅在平台自动注入时使用。
-> 若需手动检测，参见 **skill-guide Step 2**。
-
----
+> **路径约定**: 以下所有 `scripts/...` 路径均相对于本 Skill 目录（`.agents/skills/atlassian-jira-confluence/`）。
 
 ## ✅ Setup Checklist
 
@@ -48,31 +28,14 @@ pip install atlassian-python-api
 
 It's safe to run multiple times.
 
-### Step 2 — Create Config File
+### Step 2 — Configure Credentials (via t2-config)
+
+> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
 
 ```bash
-# Linux / macOS
-mkdir -p "$SKILL_WORKSPACE/config/atlassian-jira-confluence"
-
-# Windows CMD
-mkdir "%SKILL_WORKSPACE%\config\atlassian-jira-confluence"
-```
-
-Create `config/atlassian-jira-confluence/.atlassian.json`:
-
-```json
-{
-  "confluence": {
-    "url": "https://your-confluence.example.com",
-    "token": "your-pat-token",
-    "username": "you@example.com"
-  },
-  "jira": {
-    "url": "https://your-jira.example.com",
-    "token": "your-pat-token",
-    "username": "you@example.com"
-  }
-}
+python3 scripts/t2_config.py set atlassian/url       "https://yourcompany.atlassian.net"
+python3 scripts/t2_config.py set atlassian/username  "your@email.com"
+python3 scripts/t2_config.py set atlassian/api_token "your-api-token"
 ```
 
 > **Note:** `username` is only required for Atlassian Cloud (`.atlassian.net` URLs).
@@ -81,7 +44,7 @@ Create `config/atlassian-jira-confluence/.atlassian.json`:
 
 Add to `.gitignore`:
 ```
-config/atlassian-jira-confluence/.atlassian.json
+config/atlassian.json
 ```
 
 ### Step 3 — Test the Connection
@@ -230,10 +193,10 @@ def load_config() -> dict:
     """Return credentials dict from the first config file found, or {}.
 
     Search priority follows skill-guide Rule 3 (config file search order):
-      1. {workspace}/config/atlassian-jira-confluence/.atlassian.json
-      2. {workspace}/config/.atlassian.json
-      3. {workspace}/.atlassian.json
-      4. {skill-dir}/.atlassian.json
+      1. ${CFG_DIR}/atlassian.json                                  ← preferred (t2-config)
+      2. {workspace}/config/atlassian-jira-confluence/.atlassian.json
+      3. {workspace}/config/.atlassian.json
+      4. {workspace}/.atlassian.json
       5. $HOME/.config/atlassian-jira-confluence/.atlassian.json
       6. $HOME/.config/.atlassian.json
       7. $HOME/.atlassian.json
@@ -242,14 +205,20 @@ def load_config() -> dict:
     {workspace} = SKILL_WORKSPACE env var, or cwd when the script was started.
     """
     workspace = _workspace()
-    skill_dir = _skill_dir()
     home = Path.home()
+
+    # Priority 1: ${CFG_DIR}/atlassian.json (t2-config)
+    cfg_dir = os.environ.get("CFG_DIR", "").strip()
+    if cfg_dir:
+        p = Path(cfg_dir) / "atlassian.json"
+        if p.is_file():
+            with open(p) as fh:
+                return json.load(fh)
 
     candidates = [
         workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
         workspace / "config" / _CONFIG_FILENAME,
         workspace / _CONFIG_FILENAME,
-        skill_dir / _CONFIG_FILENAME,
         home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
         home / ".config" / _CONFIG_FILENAME,
         home / _CONFIG_FILENAME,
@@ -309,10 +278,10 @@ def get_confluence():
 
 | Priority | Path | Notes |
 |---|---|---|
-| 1 ✅ preferred | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` | Create here |
-| 2 | `{workspace}/config/.atlassian.json` | |
-| 3 | `{workspace}/.atlassian.json` | |
-| 4 | `{skill-dir}/.atlassian.json` | Dev/testing fallback |
+| 1 ✅ preferred | `${CFG_DIR}/atlassian.json` | Set via t2-config |
+| 2 | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` | Legacy |
+| 3 | `{workspace}/config/.atlassian.json` | Legacy |
+| 4 | `{workspace}/.atlassian.json` | Legacy |
 | 5 | `$HOME/.config/atlassian-jira-confluence/.atlassian.json` | Per-user |
 | 6 | `$HOME/.config/.atlassian.json` | |
 | 7 | `$HOME/.atlassian.json` | |

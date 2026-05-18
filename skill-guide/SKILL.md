@@ -114,6 +114,8 @@ if (-not $env:SKILL_DIR) { Write-Error "Skill '$skillName' not found" }
 
 > 如果 agent 平台会自动设置 `SKILL_DIR`，跳过此步骤。
 
+> ⚠️ **注意：** 从 skill v2.0 起，individual skills 不再要求在 SKILL.md 中定义 SKILL_DIR 检测代码。改用**路径约定**注释（见规范 2）。SKILL_DIR 检测仅在有特殊平台需求时保留。
+
 ### Step 3 — 验证环境变量已设置
 
 ```bash
@@ -132,29 +134,31 @@ print('SKILL_DIR      :', sd or '[未设置]', '  exists:', Path(sd).is_dir() if
 
 ## 📍 文件路径使用规范
 
-### 规则 1：调用 Skill 自带脚本 → 用 `$SKILL_DIR`
+### 规则 1：调用 Skill 自带脚本 → 用 `$SKILL_DIR` 或路径约定
+
+> **v2.0+ 路径约定：** 从 skill v2.0 起，各 skill 的 SKILL.md 中会注明路径约定，例如：`scripts/...` 路径均相对于本 Skill 目录（`.agents/skills/<skill-name>/`）。OpenClaw 等平台会自动将 skill 目录加入 PATH，直接使用 `scripts/...` 即可。
 
 ```bash
-# ✅ 正确
-python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open"
-
-# ❌ 错误 — 如果 cd 过，相对路径失效
+# ✅ 正确（v2.0+ 路径约定，OpenClaw 自动解析）
 python3 scripts/gerrit_api.py query "status:open"
+
+# ✅ 正确（需要 SKILL_DIR 时）
+python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open"
 
 # ❌ 错误 — SKILL_WORKSPACE 是项目目录，不是 skill 目录
 python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open"
 ```
 
-### 规则 2：读取/创建配置文件 → 用 `$SKILL_WORKSPACE`
+### 规则 2：读取/创建配置文件 → 用 t2-config 或 `$SKILL_WORKSPACE`
+
+> **v2.0+ 推荐：** 使用 `t2-config` skill 管理所有配置。设置 `CFG_DIR` 后，各 skill 的 Python 脚本会自动从 `${CFG_DIR}/<namespace>.json` 读取配置。
 
 ```bash
-# ✅ 正确 — 配置文件在项目目录下
-mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
-cp "$SKILL_DIR/scripts/gerrit_config.json.example" \
-   "$SKILL_WORKSPACE/config/gerrit-api/gerrit_config.json"
+# ✅ 正确（t2-config，v2.0+ 推荐）
+python3 scripts/t2_config.py set gerrit-api/url "https://gerrit.example.com"
 
-# ❌ 错误 — 不能保证 pwd 正确
-mkdir -p config/gerrit-api
+# ✅ 正确（传统方式，仍受支持）
+mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
 ```
 
 ### 规则 3：配置文件搜索顺序（Python 中）

@@ -7,13 +7,14 @@ Windows, Linux, and macOS without any extra dependencies (uses only the
 Python standard library: urllib, json, base64, pathlib).
 
 Credentials are loaded from the first config file found (priority order):
-  1. {workspace}/config/gerrit-api/gerrit_config.json   ← recommended
-  2. {workspace}/config/gerrit_config.json
-  3. {workspace}/gerrit_config.json
-  4. {skill-dir}/gerrit_config.json
-  5. $HOME/.config/gerrit-api/gerrit_config.json
-  6. $HOME/.config/gerrit_config.json
-  7. $HOME/gerrit_config.json
+  1. ${CFG_DIR}/gerrit-api.json                           ← preferred (t2-config)
+  2. {workspace}/config/gerrit-api/gerrit_config.json
+  3. {workspace}/config/gerrit_config.json
+  4. {workspace}/gerrit_config.json
+  5. {skill-dir}/gerrit_config.json
+  6. $HOME/.config/gerrit-api/gerrit_config.json
+  7. $HOME/.config/gerrit_config.json
+  8. $HOME/gerrit_config.json
   Then fall back to environment variables:
      GERRIT_URL, GERRIT_USERNAME, GERRIT_HTTP_PASSWORD
 
@@ -107,6 +108,13 @@ def _skill_dir() -> Path:
 
 def _find_config_file() -> str | None:
     """Return the first config file found across the priority search paths."""
+    # Priority 1: ${CFG_DIR}/gerrit-api.json (t2-config)
+    cfg_dir = os.environ.get("CFG_DIR", "").strip()
+    if cfg_dir:
+        p = Path(cfg_dir) / "gerrit-api.json"
+        if p.is_file():
+            return str(p)
+
     workspace = _workspace()
     skill_dir = _skill_dir()
     home = Path.home()

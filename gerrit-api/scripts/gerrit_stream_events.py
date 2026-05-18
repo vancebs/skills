@@ -180,19 +180,27 @@ def _find_config_file(explicit_path: str | None, ws: Path | None = None) -> str 
 
     Priority:
       1. explicit_path (if --config was specified)
-      2. {workspace}/config/{skill-name}/{filename}   ← preferred
-      3. {workspace}/config/{filename}
-      4. {workspace}/{filename}
-      5. {skill-dir}/{filename}                       ← dev/testing fallback
-      6. $HOME/.config/{skill-name}/{filename}
-      7. $HOME/.config/{filename}
-      8. $HOME/{filename}
+      2. ${CFG_DIR}/gerrit-api.json                      ← preferred (t2-config)
+      3. {workspace}/config/{skill-name}/{filename}
+      4. {workspace}/config/{filename}
+      5. {workspace}/{filename}
+      6. {skill-dir}/{filename}                           ← dev/testing fallback
+      7. $HOME/.config/{skill-name}/{filename}
+      8. $HOME/.config/{filename}
+      9. $HOME/{filename}
 
     {workspace} = SKILL_WORKSPACE env var, or --workspace arg, or cwd
     {skill-dir} = skill installation directory (SKILL_DIR env var or __file__ derivation)
     """
     if explicit_path:
         return explicit_path if Path(explicit_path).is_file() else None
+
+    # Priority 2: ${CFG_DIR}/gerrit-api.json (t2-config)
+    cfg_dir = os.environ.get("CFG_DIR", "").strip()
+    if cfg_dir:
+        p = Path(cfg_dir) / "gerrit-api.json"
+        if p.is_file():
+            return str(p)
 
     workspace = ws or _workspace()
     skill_dir = _skill_dir()

@@ -17,17 +17,25 @@ def _find_config_file() -> str | None:
     """Return the first config file found, searching in priority order.
 
     Priority:
-      1. {workspace}/config/{skill-name}/.atlassian.json   ← preferred
-      2. {workspace}/config/.atlassian.json
-      3. {workspace}/.atlassian.json
-      4. {skill-dir}/.atlassian.json                       ← dev/testing fallback
-      5. $HOME/.config/{skill-name}/.atlassian.json
-      6. $HOME/.config/.atlassian.json
-      7. $HOME/.atlassian.json
+      1. ${CFG_DIR}/atlassian.json                          ← preferred (t2-config)
+      2. {workspace}/config/{skill-name}/.atlassian.json
+      3. {workspace}/config/.atlassian.json
+      4. {workspace}/.atlassian.json
+      5. {skill-dir}/.atlassian.json                        ← dev/testing fallback
+      6. $HOME/.config/{skill-name}/.atlassian.json
+      7. $HOME/.config/.atlassian.json
+      8. $HOME/.atlassian.json
 
     {workspace} = cwd when the script is invoked
     {skill-dir} = atlassian-jira-confluence/ directory (parent of this scripts/ folder)
     """
+    # Priority 1: ${CFG_DIR}/atlassian.json (t2-config)
+    cfg_dir = os.environ.get("CFG_DIR", "").strip()
+    if cfg_dir:
+        p = Path(cfg_dir) / "atlassian.json"
+        if p.is_file():
+            return str(p)
+
     workspace = Path(os.getcwd())
     skill_dir = Path(__file__).parent.parent  # atlassian-jira-confluence/
     home = Path.home()

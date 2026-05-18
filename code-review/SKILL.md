@@ -9,6 +9,7 @@ description: >
 dependencies:
   - gerrit-api     (required — all Gerrit operations)
   - T2MCodingRule  (required — review standards)
+  - t2-config      (for code-review config)
   - skill-guide    (recommended — path and environment guidance)
 compatibility: Requires python3 (≥3.9). Python stdlib only — no pip needed.
 keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
@@ -33,40 +34,15 @@ keywords: [code-review, gerrit, patch, diff, review, T2Mobile]
 
 ---
 
-## ⚠️ Step 0 — 初始化环境变量（每次会话执行一次）
-
-```bash
-# Linux / macOS
-export SKILL_WORKSPACE="$(pwd)"
-export SKILL_DIR=$(python3 -c "
-import os, sys; from pathlib import Path; n='code-review'
-ws=Path(os.environ.get('SKILL_WORKSPACE',os.getcwd()))
-[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
-sys.exit(1)") || echo "❌ code-review not found: npx skills add https://github.com/vancebs/skills --skill code-review"
-
-# 设置 gerrit-api skill 目录（独立变量，避免与 SKILL_DIR 冲突）
-export GERRIT_API_SKILL_DIR=$(python3 -c "
-import os, sys; from pathlib import Path; n='gerrit-api'
-ws=Path(os.environ.get('SKILL_WORKSPACE',os.getcwd()))
-[print(p) or sys.exit(0) for p in [ws/'.agents'/'skills'/n, Path.home()/'.agents'/'skills'/n] if p.is_dir()]
-sys.exit(1)") || echo "❌ gerrit-api not found: npx skills add https://github.com/vancebs/skills --skill gerrit-api"
-```
-
-> **SKILL_DIR 冲突 / Windows PowerShell 版本：** 参见 **skill-guide Step 2** 和 **skill-guide 错误 7**（多 skill SKILL_DIR 冲突处理）。
-
----
+> **路径约定**: `scripts/...` 路径均相对于 code-review Skill 目录（`.agents/skills/code-review/`）；`gerrit-api` 操作路径均相对于（`.agents/skills/gerrit-api/`）。
 
 ## Step 1 — 环境检查（首次加载 skill 时运行一次）
 
 ```bash
-# Linux / macOS
-python3 "$SKILL_DIR/scripts/check_env.py"
-
-# Windows
-python "%SKILL_DIR%\scripts\check_env.py"
+python3 scripts/check_env.py
 ```
 
-脚本检查：Python 版本、gerrit-api 已安装、GERRIT_API_SKILL_DIR 已设置、code-review 配置文件存在。
+脚本检查：Python 版本、gerrit-api 已安装、code-review 配置文件存在。
 
 **如果 gerrit-api 未安装，脚本会输出安装命令：**
 ```
@@ -76,30 +52,29 @@ python "%SKILL_DIR%\scripts\check_env.py"
 
 安装后，运行 gerrit-api 的环境检查（配置 Gerrit 连接）：
 ```bash
-python3 "$GERRIT_API_SKILL_DIR/scripts/check_env.py"
+python3 scripts/check_env.py
 ```
 
 ---
 
-## Step 2 — 创建 code-review 配置文件（一次性）
+## Step 2 — Configure code-review (via t2-config)
+
+> Requires `t2-config` skill. Install: `npx skills add https://github.com/vancebs/skills --skill t2-config`
+
+```bash
+python3 scripts/t2_config.py set code-review/test_mode true
+# Optionally add file patterns to skip:
+# python3 scripts/t2_config.py set code-review/skip_file_patterns '["*.min.js","*.generated.*"]'
+```
 
 > ⚠️ **Gerrit 连接配置（host/username/password）在 gerrit-api skill 中管理，不在此处配置。**
 
-```bash
-# Linux / macOS
-mkdir -p "$SKILL_WORKSPACE/config/code-review"
-cp "$SKILL_DIR/scripts/config.json.example" \
-   "$SKILL_WORKSPACE/config/code-review/code_review_config.json"
+Add to `.gitignore`:
+```
+config/code-review.json
 ```
 
-```powershell
-# Windows PowerShell
-New-Item -ItemType Directory -Force "$env:SKILL_WORKSPACE\config\code-review"
-Copy-Item "$env:SKILL_DIR\scripts\config.json.example" `
-          "$env:SKILL_WORKSPACE\config\code-review\code_review_config.json"
-```
-
-配置文件内容：
+**配置字段说明：**
 
 | 字段 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
@@ -149,13 +124,13 @@ https://gerrit.example.com/#/c/12345/                              → 12345
 
 **通过 Change-Id 查询 change number：**
 ```bash
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+python3 scripts/gerrit_api.py \
   query "change:Iabcdef1234567890abcdef1234567890abcdef12+limit:1"
 ```
 
 **通过 commit SHA 查询 change number：**
 ```bash
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+python3 scripts/gerrit_api.py \
   query "commit:abc123def456+limit:1"
 ```
 
@@ -163,12 +138,12 @@ python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
 
 ### 阶段二 — 通过 gerrit-api 获取 Patch 数据
 
-以下命令全部使用 `GERRIT_API_SKILL_DIR`（不是 `SKILL_DIR`）。
+以下命令全部使用 `gerrit-api` skill 的脚本（路径: `.agents/skills/gerrit-api/scripts/`）。
 
 #### 2A — 获取变更详情
 
 ```bash
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" get-change <change_number>
+python3 scripts/gerrit_api.py get-change <change_number>
 ```
 
 **从输出中提取：**
@@ -181,7 +156,7 @@ python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" get-change <change_number>
 #### 2B — 列出变更文件
 
 ```bash
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" list-files <change_number>
+python3 scripts/gerrit_api.py list-files <change_number>
 ```
 
 输出为文件路径列表。跳过以下文件（对应 `skip_file_patterns` 配置）：
@@ -192,13 +167,13 @@ python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" list-files <change_number>
 对 `list-files` 返回的每个文件路径执行：
 
 ```bash
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+python3 scripts/gerrit_api.py \
   get-diff <change_number> "path/to/file.java"
 ```
 
 **Windows 将 `python3` 替换为 `python`，路径分隔符用 `%`：**
 ```batch
-python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" get-diff <change_number> "path/to/file.java"
+python scripts\gerrit_api.py get-diff <change_number> "path/to/file.java"
 ```
 
 收集所有文件的 diff 后，进入阶段三。
@@ -332,12 +307,12 @@ Code Review 报告
 
 ```bash
 # PASS：Verified=0，发布 comment
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+python3 scripts/gerrit_api.py \
   review <change_number> current \
   '{"message": "<报告文本>", "labels": {"Verified": 0}, "tag": "code-review-agent"}'
 
 # FAIL：Verified=-1，发布 comment
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+python3 scripts/gerrit_api.py \
   review <change_number> current \
   '{"message": "<报告文本>", "labels": {"Verified": -1}, "tag": "code-review-agent"}'
 ```
@@ -354,7 +329,7 @@ report = '''
 print(json.dumps({'message': report, 'labels': {'Verified': 0}, 'tag': 'code-review-agent'}))
 " > /tmp/review_body.json
 
-python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
+python3 scripts/gerrit_api.py \
   review <change_number> current "$(cat /tmp/review_body.json)"
 ```
 
@@ -368,7 +343,7 @@ $body = @{
     tag     = "code-review-agent"
 } | ConvertTo-Json -Compress
 
-python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" review <change_number> current $body
+python scripts\gerrit_api.py review <change_number> current $body
 ```
 
 **gerrit-api review 命令退出码：**
@@ -385,7 +360,7 @@ python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" review <change_number> 
 | 异常情况 | 触发条件 | 处理动作 |
 |---|---|---|
 | gerrit-api 未安装 | `check_env.py` 输出 ❌ | 运行安装命令后重新检查 |
-| GERRIT_API_SKILL_DIR 未设置 | 调用 gerrit_api.py 报错 | 重新执行 Step 0 |
+| gerrit-api 安装路径不正确 | 调用 gerrit_api.py 报错 | 重新安装 gerrit-api skill，确认路径 |
 | `get-change` 返回空或错误 | change_number 不存在 | 确认 change_number 正确 |
 | `list-files` 返回空 | 纯文档变更 | 输出"无代码文件，跳过审查" |
 | `get-diff` 失败 | 文件已删除或 revision 不对 | 跳过该文件，继续其他文件 |
@@ -451,7 +426,7 @@ python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" review <change_number> 
 | `gerrit-api` | **必须** | 所有 Gerrit 操作（get-change/list-files/get-diff/review）均通过它完成 |
 | `T2MCodingRule` | **必须** | 提供审查规范 |
 | `agent-code-review` | 互补 | `agent-code-review` 自带轮询；本 skill 专注按需单次审查 |
-| `skill-guide` | 建议安装 | 解决 SKILL_DIR/GERRIT_API_SKILL_DIR 路径问题 |
+| `skill-guide` | 建议安装 | 解决路径和环境问题 |
 
 ---
 

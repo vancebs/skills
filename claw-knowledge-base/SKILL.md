@@ -133,10 +133,12 @@ export KNOWLEDGE_BASE_DIR="/path/to/your/knowledge-base"
 
 ---
 
+> **路径约定**: 以下所有 `scripts/...` 路径均相对于本 Skill 目录（`.agents/skills/claw-knowledge-base/`）。
+
 ## ✅ Step 1 — 环境检查（首次使用时运行一次）
 
 ```bash
-python3 "$SKILL_DIR/scripts/check_env.py"
+python3 scripts/check_env.py
 ```
 
 脚本检查：
@@ -158,7 +160,7 @@ python3 "$SKILL_DIR/scripts/check_env.py"
 ## ✅ Step 2 — 初始化目录结构（首次使用时运行一次）
 
 ```bash
-python3 "$SKILL_DIR/scripts/init_dirs.py"
+python3 scripts/init_dirs.py
 ```
 
 脚本在 `KNOWLEDGE_BASE_DIR` 下创建所有标准子目录，并在每个目录写入 `README.md` 说明文件。已存在的文件不会覆盖。
@@ -205,7 +207,7 @@ knowledge-base/
 ├── coding-standards/     # 编码规范和最佳实践
 ├── troubleshooting/      # 常见问题和解决方案
 ├── release-notes/        # 版本发布记录
-├── code-review/          # code review 记录和决策
+├── code-review/          # 存档 code review 报告
 ├── temp/                 # agent 之间临时文件分享（定期清理）
 ├── onboarding/           # 新成员入职指南
 └── {agent_def_dir}/      # 各 agent 自定义目录（见下方说明）
@@ -219,7 +221,7 @@ knowledge-base/
 | `coding-standards/` | 编码规范更新、新语言/框架规范建立 | `java-naming-rules.md` |
 | `troubleshooting/` | 反复出现的问题、排查步骤确认后 | `gerrit-ssh-connection-fail.md` |
 | `release-notes/` | 每个里程碑 / 版本发布后 | `v2.3.0-release-notes.md` |
-| `code-review/` | 重要 review 决策、典型问题记录 | `2026-05-api-security-review.md` |
+| `code-review/` | 存档 code review 报告（每次审查生成一份）| `2026-05-18_12345.md` |
 | `temp/` | agent 之间一次性文件传递 | `agent-a-to-b-handoff.md` |
 | `onboarding/` | 环境搭建、常用命令、项目结构说明 | `dev-environment-setup.md` |
 | `{agent_def_dir}/` | 各 agent 私有的持久化知识 | `<agent-name>-context.md` |
@@ -301,7 +303,7 @@ flowchart TD
     B -- 规范 --> D[coding-standards/]
     B -- 问题解决 --> E[troubleshooting/]
     B -- 版本记录 --> F[release-notes/]
-    B -- CR记录 --> G[code-review/]
+    B -- CR报告存档 --> G[code-review/]
     B -- 临时传递 --> H[temp/]
     B -- 入职信息 --> I[onboarding/]
     B -- agent私有 --> J[{agent_def_dir}/]
@@ -365,24 +367,6 @@ flowchart TD
 | 创建新文件 | ❌ 非幂等 | 已存在时必须先读取再决定追加或跳过，不得覆盖 |
 
 ---
-
-## 配置参考
-
-### SKILL_DIR 设置方式
-
-```bash
-# Linux / macOS
-export SKILL_DIR=$(python3 -c "
-import os, sys
-from pathlib import Path
-name = 'claw-knowledge-base'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
-for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
-    if p.is_dir():
-        print(p); sys.exit(0)
-sys.exit(1)
-") || echo "ERROR: claw-knowledge-base not found"
-```
 
 ### KNOWLEDGE_BASE_DIR 来源优先级
 
