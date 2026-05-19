@@ -477,6 +477,170 @@ Exit code:
 
 ---
 
+<a name="rule-12"></a>
+### 规范 12：配置文件与环境变量策略
+
+**适用范围：** 仅当 skill 存在需要用户配置的参数时（如服务器地址、账号、API token）才需遵守本规范。不涉及用户配置的 skill 可跳过。
+
+**核心原则：** 同时支持 JSON 配置文件和环境变量，两者等价，配置文件优先级高于环境变量。仅当两种方式均未配置时，才引导用户。
+
+---
+
+#### 12.1 配置文件格式
+
+JSON 文件，key 为环境变量名，value 为对应值：
+
+```json
+{
+  "MY_SKILL_URL": "https://example.com",
+  "MY_SKILL_USERNAME": "john.doe",
+  "MY_SKILL_TOKEN": "your-api-token"
+}
+```
+
+---
+
+#### 12.2 配置文件搜索路径（优先级从高到低）
+
+| 优先级 | 路径 | 说明 |
+|---|---|---|
+| 1（最高）| `{workspace}/.config/{skill-name}.json` | 项目/agent 专属配置（多 agent 隔离） |
+| 2 | `~/.config/{skill-name}.json` | 用户全局配置 |
+| 3（最低）| 环境变量 | 原有方式，仍完整支持 |
+
+> `{workspace}` 在 OpenClaw 中为 agent 工作目录（`Path.cwd()`），每个 agent 独立。
+
+---
+
+#### 12.3 标准 Python 配置加载实现
+
+复制以下模板到每个 skill 的脚本中（不需要共享模块）：
+
+```python
+import json, os
+from pathlib import Path
+
+
+def _load_file_config(skill_name: str, workspace: str | None = None) -> dict:
+    """Load JSON config from workspace or home .config directory.
+
+    Config file format: {"ENV_VAR_NAME": "value", ...}
+    Returns empty dict if no config file found or on parse error.
+    """
+    candidates = []
+    if workspace:
+        candidates.append(Path(workspace) / ".config" / f"{skill_name}.json")
+    candidates.append(Path.cwd() / ".config" / f"{skill_name}.json")
+    candidates.append(Path.home() / ".config" / f"{skill_name}.json")
+
+    seen, search = set(), []
+    for p in candidates:
+        k = str(p)
+        if k not in seen:
+            seen.add(k)
+            search.append(p)
+
+    for path in search:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass  # Silently skip invalid/unreadable files — fall back to env vars
+    return {}
+
+
+def _get_config(key: str, cfg: dict, default: str = "") -> str:
+    """Get value: config file > env var > default."""
+    return cfg.get(key) or os.environ.get(key, default) or default
+```
+
+**使用示例：**
+
+```python
+def load_config(workspace: str | None = None):
+    cfg = _load_file_config("my-skill", workspace)
+    url   = _get_config("MY_SKILL_URL", cfg)
+    token = _get_config("MY_SKILL_TOKEN", cfg)
+
+    if not url:
+        _die(
+            "MY_SKILL_URL is not set.\n"
+            "  Option A (config file): create {workspace}/.config/my-skill.json\n"
+            '    {"MY_SKILL_URL": "https://example.com", "MY_SKILL_TOKEN": "..."}\n'
+            '  Option B (env var): export MY_SKILL_URL="https://example.com"'
+        )
+    return url, token
+```
+
+---
+
+#### 12.4 SKILL.md 文档规范
+
+在 Setup Checklist 的配置步骤中，用 **Option A / B** 格式并列说明两种方式：
+
+```markdown
+### Step X — Configure
+
+Choose **one** of the two options below. Config file takes priority over env vars.
+
+**Option A — Config file (recommended for persistent setups)**
+
+Create `{workspace}/.config/{skill-name}.json` (or `~/.config/{skill-name}.json`):
+
+\`\`\`json
+{
+  "MY_SKILL_URL": "https://example.com",
+  "MY_SKILL_TOKEN": "your-token"
+}
+\`\`\`
+
+**Option B — Environment variables**
+
+\`\`\`bash
+export MY_SKILL_URL="https://example.com"
+export MY_SKILL_TOKEN="your-token"
+\`\`\`
+```
+
+---
+
+#### 12.5 check_env.py 集成要求
+
+`check_env.py` 需在输出中说明实际生效的配置来源：
+
+```python
+cfg = _load_file_config("my-skill")
+if cfg:
+    print(f"✅ 配置来源: 配置文件")
+else:
+    print(f"✅ 配置来源: 环境变量")
+```
+
+必填项缺失时（config 和 env 均未配置），输出 ❌ 并引导用户选择其一：
+
+```
+❌ MY_SKILL_URL 未设置
+   Option A: 创建 .config/my-skill.json，添加 "MY_SKILL_URL": "https://..."
+   Option B: export MY_SKILL_URL="https://example.com"
+```
+
+---
+
+#### 12.6 注意事项
+
+| 原则 | 说明 |
+|---|---|
+| 不记录凭据 | 脚本不得将 password / token 打印到 stdout/stderr |
+| 配置文件非必选 | 两种方式均可；不强制用户创建配置文件 |
+| 解析错误静默 | 配置文件格式错误时静默忽略，回退到环境变量，不崩溃 |
+| env var 命名 | 全大写 + 下划线，前缀加 skill 名（如 `GERRIT_URL`），避免与系统变量冲突 |
+| 多 agent 隔离 | 每个 agent 的 CWD 不同，`{workspace}/.config/` 路径天然隔离 |
+| `--workspace` 支持 | 脚本提供 `--workspace` 参数，允许覆盖 CWD 用于 config 搜索 |
+
+---
+
 <a name="constraints"></a>
 ## ⛔ 约束与禁止事项
 

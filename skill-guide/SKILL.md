@@ -45,7 +45,7 @@ triggers:
 
 ### PART 2 快速导航
 
-常用入口： [§ 2.0 原则总览](#section-2-0)、[§ 规范 3](#rule-3)、[§ 规范 8](#rule-8)、[§ 规范 10](#rule-10)、[§ 规范 11](#rule-11)。
+常用入口： [§ 2.0 原则总览](#section-2-0)、[§ 规范 3](#rule-3)、[§ 规范 8](#rule-8)、[§ 规范 10](#rule-10)、[§ 规范 11](#rule-11)、[§ 规范 12](#rule-12)。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -192,49 +192,51 @@ python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open"
 python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open"
 ```
 
-### 规则 2：读取/创建配置文件 → 用环境变量或 `$SKILL_WORKSPACE`
+### 规则 2：读取/创建配置文件 → 用环境变量或 JSON 配置文件
 
-> **v2.0+ 推荐：** 使用环境变量管理所有配置。各 skill 的 Python 脚本直接从对应的环境变量读取配置（如 `GERRIT_URL`、`ATLASSIAN_API_TOKEN` 等）。
+> **v2.0+ 推荐：** 支持 JSON 配置文件和环境变量两种方式，配置文件优先级更高。配置文件路径：`{workspace}/.config/{skill-name}.json` 或 `~/.config/{skill-name}.json`。详见 [规范 12](#rule-12)。
 
 ```bash
-# ✅ 正确（v2.0+ 环境变量，推荐）
+# ✅ 正确（v2.0+ 环境变量，仍完整支持）
 export GERRIT_URL="https://gerrit.example.com"
 export GERRIT_USERNAME="john.doe"
 export GERRIT_HTTP_PASSWORD="your-http-token"
 
-# ✅ 正确（传统方式，输出文件仍使用 SKILL_WORKSPACE）
-mkdir -p "$SKILL_WORKSPACE/config/gerrit-api"
+# ✅ 正确（v2.0+ 配置文件，优先级更高）
+# 创建 {workspace}/.config/gerrit-api.json：
+# { "GERRIT_URL": "...", "GERRIT_USERNAME": "...", "GERRIT_HTTP_PASSWORD": "..." }
 ```
 
-### 规则 3：配置文件搜索顺序（Python 中）
+### 规则 3：配置文件搜索顺序（v2.0+ Python 标准模板）
 
-当 skill 的 Python 脚本搜索配置文件时，标准搜索顺序如下（从高到低）：
+> **v2.0+ 新格式：** skill 使用 `.config/{skill-name}.json` 格式，路径更简洁。参考 [规范 12](#rule-12) 获取完整实现模板。
 
 ```python
+import json, os
 from pathlib import Path
-import os
 
-def find_config(filename: str, skill_name: str) -> Path | None:
-    ws = Path(os.environ.get("SKILL_WORKSPACE", os.getcwd()))
-    sd = Path(os.environ.get("SKILL_DIR", Path(__file__).parent.parent))
-    home = Path.home()
+def _load_file_config(skill_name: str, workspace: str | None = None) -> dict:
+    """v2.0+ 标准配置加载（优先级：workspace > home > env var）"""
+    candidates = []
+    if workspace:
+        candidates.append(Path(workspace) / ".config" / f"{skill_name}.json")
+    candidates.append(Path.cwd() / ".config" / f"{skill_name}.json")
+    candidates.append(Path.home() / ".config" / f"{skill_name}.json")
+    for path in candidates:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {}
 
-    candidates = [
-        ws / "config" / skill_name / filename,   # ← 推荐创建位置
-        ws / "config" / filename,
-        ws / filename,
-        sd / filename,                            # skill 自带示例
-        home / ".config" / skill_name / filename,
-        home / ".config" / filename,
-        home / filename,
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p
-    return None
+# 使用：cfg = _load_file_config("gerrit-api")
+# 读取：cfg.get("GERRIT_URL") or os.environ.get("GERRIT_URL", "")
 ```
 
-> **推荐配置文件位置：** `{SKILL_WORKSPACE}/config/{skill-name}/{config-file}`
+> **推荐配置文件位置（v2.0+）：** `{workspace}/.config/{skill-name}.json`
 
 ### 规则 4：输出文件和日志 → 用 `$SKILL_WORKSPACE`
 
@@ -650,11 +652,18 @@ Harness Engineering 要求作者显式声明边界、异常路径、幂等性和
 
 > 📖 详细说明见 [`references/skill-authoring-rules.md`](references/skill-authoring-rules.md) — 规范 11 节
 
+<a name="rule-12"></a>
+### 规范 12：配置文件与环境变量策略
+
+当 skill 涉及用户配置参数（服务地址、账号、token 等）时，须同时支持 JSON 配置文件和环境变量两种方式，配置文件优先。仅当两种方式均未配置时才引导用户。配置文件非必选项——两种方式等价。
+
+> 📖 详细说明（Python 实现模板、SKILL.md 格式规范、check_env.py 集成）见 [`references/skill-authoring-rules.md`](references/skill-authoring-rules.md) — 规范 12 节
+
 ## 📚 参考文件
 
 | 文件 | 内容 |
 |---|---|
-| [`references/skill-authoring-rules.md`](references/skill-authoring-rules.md) | 规范 1–8, 11 的完整说明 |
+| [`references/skill-authoring-rules.md`](references/skill-authoring-rules.md) | 规范 1–8, 11–12 的完整说明 |
 | [`references/prompt-templates.md`](references/prompt-templates.md) | 规范 9–10：模板库与 Prompt 示例 |
 | [`references/quick-reference-card.md`](references/quick-reference-card.md) | 快速参考卡（变量、命令速查）|
 
