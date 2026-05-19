@@ -1,6 +1,31 @@
 ---
 name: atlassian-jira-confluence
-description: "Use this skill whenever the user wants to interact with Jira or Confluence. This includes creating, reading, updating, or deleting Jira issues, projects, sprints, boards, components, versions, attachments, comments, worklogs, users, groups, or permissions. Also use for any Confluence operation: pages, spaces, labels, attachments, templates, whiteboards, comments, search (CQL), or space permissions. Trigger on phrases like 'create a Jira issue', 'update Confluence page', 'search issues with JQL', 'add comment to ticket', 'get sprint info', 'list Confluence spaces', 'export page as PDF', or any request involving Atlassian tools. Always invoke this skill before answering Jira or Confluence questions, even if the user does not explicitly say 'use the skill'."
+description: >
+  This skill should be used when the user asks to "create a Jira issue",
+  "update Confluence page", "search issues with JQL", "add comment to ticket",
+  "get sprint info", "list Confluence spaces", "export page as PDF", or any
+  Jira/Confluence CRUD operation. Covers all Jira and Confluence REST operations
+  via atlassian-python-api. Always invoke before answering Jira or Confluence
+  questions, even without explicit mention.
+keywords:
+  - jira
+  - confluence
+  - atlassian
+  - issue
+  - sprint
+  - board
+  - page
+  - space
+  - CQL
+  - JQL
+triggers:
+  - jira
+  - confluence
+  - create issue
+  - update page
+  - search JQL
+  - sprint
+  - Atlassian
 dependencies:
   - pip: atlassian-python-api
 ---
@@ -97,7 +122,7 @@ print(jira.myself())
 ### Workflow A — Triage / Update a Jira Issue (Step-by-Step Checklist)
 
 - [ ] 1. Install SDK if needed: `pip install atlassian-python-api`
-- [ ] 3. Copy the **Initialize Clients** code block below into your script
+- [ ] 3. Copy the **Initialize Clients** code block below into the script
 - [ ] 4. Search for issues:
   ```python
   issues = jira.jql("project = PROJ AND status = 'To Do' ORDER BY priority DESC", limit=20)
@@ -126,7 +151,7 @@ print(jira.myself())
 
 ### Workflow B — Create / Update a Confluence Page (Step-by-Step Checklist)
 
-- [ ] 1. Copy the **Initialize Clients** code block below into your script
+- [ ] 1. Copy the **Initialize Clients** code block below into the script
 - [ ] 3. Find the target space key (list all spaces):
   ```python
   spaces = confluence.get_all_spaces(start=0, limit=50)
