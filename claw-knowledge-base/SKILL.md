@@ -36,6 +36,17 @@ triggers:
 - **读取**：用 `memory_search` 做语义检索，或按 `kb://` 路径直接读取文件
 - **写入**：把 Markdown 内容写入 `KNOWLEDGE_BASE_DIR` 下的合适分类目录
 
+## ⚡ 操作速查
+
+| 操作 | 方法 | 示例 |
+|---|---|---|
+| 语义检索 | `memory_search "关键词"` | `memory_search "gerrit SSH"` |
+| 路径读取 | `cat $KNOWLEDGE_BASE_DIR/<path>` | `cat $KNOWLEDGE_BASE_DIR/temp/x.md` |
+| 路径引用 | `kb://<path>` | `kb://code-review/2024-01-15_12345.md` |
+| 写入文件 | Python `Path.write_text()` | 见工作流示例 |
+| 初始化目录 | `python3 scripts/init_dirs.py` | — |
+| 环境检查 | `python3 scripts/check_env.py` | — |
+
 ## 🚀 Quick Start
 
 1. **设置知识库目录**（选择一种方式）
@@ -104,17 +115,94 @@ triggers:
 | `kb://code-review-agent/context.md` | `$KNOWLEDGE_BASE_DIR/code-review-agent/context.md` |
 | `kb://` | `$KNOWLEDGE_BASE_DIR/` |
 
-> 📖 完整目录结构说明和最佳实践见 [`references/directory-guide.md`](references/directory-guide.md)
+> 📖 完整目录结构说明和最佳实践见 [`references/directory-guide.md`](references/directory-guide.md)  
+> 📖 `kb://` 路径用法、`memory_search` 检索技巧、多 Agent 协作模式见 [`references/search-patterns.md`](references/search-patterns.md)
 
 ## 📚 参考文件
 
 | 文件 | 内容 |
 |---|---|
 | [`references/directory-guide.md`](references/directory-guide.md) | 目录结构详解、命名规范、检索示例、最佳实践 |
+| [`references/search-patterns.md`](references/search-patterns.md) | `kb://` 路径用法、`memory_search` 检索技巧、多 Agent 协作模式 |
 
 ---
 
-## ⛔ 约束与禁止事项
+## 🔄 常见 Agent 工作流
+
+### 工作流 1 — Code Review Agent 存档报告
+
+```
+输入：code review 完成后的报告文本
+
+Step 1: 确认 KNOWLEDGE_BASE_DIR 已设置
+Step 2: 写入存档目录
+  目标路径: kb://code-review/YYYY-MM-DD_<change_number>.md
+  内容格式: Markdown，包含变更详情、审查结果、问题列表
+
+Step 3: （可选）同时写临时文件供其他 Agent 消费
+  目标路径: kb://temp/review-<change_number>.md
+  文件头需包含: expires: YYYY-MM-DD
+```
+
+**示例（Python）：**
+```python
+from pathlib import Path
+from datetime import date
+import os
+
+kb = Path(os.environ['KNOWLEDGE_BASE_DIR'])
+change = "12345"
+report_path = kb / 'code-review' / f'{date.today().isoformat()}_{change}.md'
+report_path.write_text(report_content, encoding='utf-8')
+```
+
+---
+
+### 工作流 2 — 检索历史问题解决方案
+
+```
+场景：遇到 Gerrit SSH 连接超时问题，先检索知识库
+
+Step 1: memory_search "gerrit SSH timeout connection refused"
+Step 2: 如有结果，读取对应文件
+  cat "$KNOWLEDGE_BASE_DIR/troubleshooting/gerrit-ssh.md"
+  或通过 kb://troubleshooting/gerrit-ssh.md 引用
+Step 3: 按照文件中的解决方案操作
+Step 4: 如发现新解法，追加到同一文件（先读后写）
+```
+
+---
+
+### 工作流 3 — 多 Agent 传递临时数据
+
+```
+Agent A 写入:
+  kb://temp/analysis-<task_id>.md   ← 包含 expires 字段
+
+Agent B 读取和清理:
+  1. memory_search "temp analysis <task_id>"
+  2. 读取文件内容处理业务逻辑
+  3. 删除临时文件（temp/ 目录不保留持久文件）
+```
+
+---
+
+### 工作流 4 — 初始化新知识库
+
+```bash
+# Step 1: 设置路径（config 文件或环境变量）
+# Step 2: 检查环境
+python3 scripts/check_env.py
+
+# Step 3: 创建标准目录结构
+python3 scripts/init_dirs.py
+
+# Step 4: 在 openclaw.json 中注册索引路径（见 Quick Start Step 3）
+```
+
+---
+
+
 
 ### 不支持的场景
 

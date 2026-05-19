@@ -447,6 +447,7 @@ python .agents\skills\gerrit-api\scripts\gerrit_api.py review <change_number> cu
 | 文件 | 内容 |
 |---|---|
 | [`references/review-workflow.md`](references/review-workflow.md) | 完整审查流程和报告格式模板 |
+| [`references/error-handling-guide.md`](references/error-handling-guide.md) | 各阶段错误场景、诊断步骤和恢复措施 |
 
 ---
 
