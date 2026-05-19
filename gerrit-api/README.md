@@ -8,67 +8,40 @@
 
 ## 配置
 
-### 配置文件（推荐）
+### 配置方式（选一）
 
-按以下优先级自动搜索配置文件：
+配置文件优先级高于环境变量，两种方式等价，均为可选（有默认值的字段可省略）。
 
-| 优先级 | 路径 |
-|---|---|
-| 1（推荐） | `{workspace}/config/gerrit-api/gerrit_config.json` |
-| 2 | `{workspace}/config/gerrit_config.json` |
-| 3 | `{workspace}/gerrit_config.json` |
-| 4 | `{skill-dir}/gerrit_config.json` |
-| 5 | `$HOME/.config/gerrit-api/gerrit_config.json` |
-| 6 | `$HOME/.config/gerrit_config.json` |
-| 7 | `$HOME/gerrit_config.json` |
+**方式 A — 配置文件（推荐）**
 
-`{workspace}` 为运行脚本时的当前目录。建议将配置文件创建在最高优先级路径：
-
-```bash
-mkdir -p config/gerrit-api
-cp /path/to/gerrit-api/scripts/gerrit_config.json.example config/gerrit-api/gerrit_config.json
-```
-
-配置文件格式（参考 `scripts/gerrit_config.json.example`）：
+创建 `$WORKSPACE/.config/gerrit-api.json`（或 `~/.config/gerrit-api.json`）：
 
 ```json
 {
-  "url": "https://gerrit.example.com",
-  "username": "john.doe",
-  "password": "your-http-credential-token",
-
-  "ssh_host": "gerrit.example.com",
-  "ssh_port": 29418,
-  "ssh_username": "john.doe",
-  "ssh_key": "~/.ssh/id_rsa"
+  "GERRIT_URL": "https://gerrit.example.com",
+  "GERRIT_USERNAME": "john.doe",
+  "GERRIT_HTTP_PASSWORD": "your-http-credential-token",
+  "GERRIT_SSH_PORT": "29418",
+  "GERRIT_SSH_KEY": "~/.ssh/id_rsa"
 }
 ```
 
-| 字段 | 说明 |
-|---|---|
-| `url` | Gerrit 实例 URL（无尾部斜杠） |
-| `username` | Gerrit HTTP 用户名（Settings → Profile） |
-| `password` | HTTP 凭据令牌（Settings → HTTP Credentials → Generate Password） |
-| `ssh_host` | SSH 主机名（可从 `url` 自动推导） |
-| `ssh_port` | SSH 端口，默认 `29418` |
-| `ssh_username` | SSH 用户名，默认与 `username` 相同 |
-| `ssh_key` | SSH 私钥路径，留空则使用 `~/.ssh/` 默认密钥 |
+**方式 B — 环境变量**
 
-> **注意**：`password` 是 Gerrit 专用 HTTP 凭据令牌，不是登录密码。`ssh_*` 字段仅 stream-events 功能需要。
+```bash
+# 必填
+export GERRIT_URL="https://gerrit.example.com"
+export GERRIT_USERNAME="john.doe"
+export GERRIT_HTTP_PASSWORD="your-http-credential-token"
 
-### 环境变量（回退）
+# SSH stream-events（可选，均有默认值）
+export GERRIT_SSH_HOST="gerrit.example.com"   # 默认：从 GERRIT_URL 推导
+export GERRIT_SSH_PORT=29418                   # 默认：29418
+export GERRIT_SSH_USERNAME="john.doe"          # 默认：GERRIT_USERNAME
+export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # 默认：~/.ssh/id_rsa
+```
 
-配置文件缺失或对应字段为空时自动回退：
-
-| 环境变量 | 对应字段 |
-|---|---|
-| `GERRIT_URL` | `url` |
-| `GERRIT_USERNAME` | `username` |
-| `GERRIT_HTTP_PASSWORD` | `password` |
-| `GERRIT_SSH_HOST` | `ssh_host` |
-| `GERRIT_SSH_PORT` | `ssh_port` |
-| `GERRIT_SSH_USERNAME` | `ssh_username` |
-| `GERRIT_SSH_KEY` | `ssh_key` |
+> ⚠️ `GERRIT_HTTP_PASSWORD` 是 Gerrit 专用 HTTP 凭据令牌，不是登录密码。生成路径：Gerrit → Settings → HTTP Credentials → Generate Password
 
 ---
 

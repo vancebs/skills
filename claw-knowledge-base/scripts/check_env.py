@@ -112,7 +112,7 @@ else:
           f"运行 ls -la {kb.parent} 检查权限；或 chmod 755 {kb}")
 
 # ── 4. openclaw.json check ────────────────────────────────────────────────────
-workspace = Path(os.environ.get("SKILL_WORKSPACE", os.getcwd()))
+workspace = Path(os.environ.get("WORKSPACE", os.getcwd()))
 openclaw_paths = [
     workspace / "openclaw.json",
     workspace / ".openclaw" / "openclaw.json",

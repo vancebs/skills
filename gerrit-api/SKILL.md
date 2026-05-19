@@ -58,7 +58,7 @@ Choose **one** of the two options below. Config file takes priority over env var
 
 **Option A — Config file (recommended for persistent setups)**
 
-Create `{workspace}/.config/gerrit-api.json` (or `~/.config/gerrit-api.json`):
+Create `$WORKSPACE/.config/gerrit-api.json` (or `~/.config/gerrit-api.json`):
 
 ```json
 {

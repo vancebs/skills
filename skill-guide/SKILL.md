@@ -6,12 +6,14 @@ description: >
   or asks to "create a skill", "write a SKILL.md", "improve skill description",
   "add harness engineering", or needs skill authoring standards (PART 2).
   Supplements skill-creator with detailed rules, templates, and Harness Engineering
-  constraints. Trigger on: FileNotFoundError, 路径错误, skill authoring, check_env.
+  constraints. Trigger on: FileNotFoundError, 路径错误, skill authoring, check_env,
+  WORKSPACE.
 keywords:
   - skill
   - guide
   - path
   - workspace
+  - WORKSPACE
   - configuration
   - troubleshooting
   - skill-authoring
@@ -28,6 +30,7 @@ triggers:
   - 配置未加载
   - SKILL_DIR
   - check_env
+  - WORKSPACE
 ---
 
 # Skill Guide
@@ -62,15 +65,15 @@ triggers:
 
 在调用 skill 时，始终需要区分以下三个不同的目录。**混淆它们是能力较弱的模型最常见的错误来源。**
 
-| 变量                | 含义                 | 典型路径                                                                                       | 用于               |
-| ----------------- | ------------------ | ------------------------------------------------------------------------------------------ | ---------------- |
-| `SKILL_WORKSPACE` | Agent 的**项目工作目录**  | `/home/user/myproject`                                                                     | 配置文件、输出文件、日志     |
-| `SKILL_DIR`       | **当前 skill 的安装目录** | `/home/user/myproject/.agents/skills/gerrit-api`或者``/home/user/.agents/skills/gerrit-api`` | 该 skill 自带的脚本和文件 |
-| `$HOME`           | 用户主目录              | `/home/user`                                                                               | 全局配置、全局安装的 skill |
+| 变量          | 含义                 | 典型路径                                                                                       | 用于               |
+| ----------- | ------------------ | ------------------------------------------------------------------------------------------ | ---------------- |
+| `WORKSPACE` | Agent 的**项目工作目录**  | `/home/user/myproject`                                                                     | 配置文件、输出文件、日志     |
+| `SKILL_DIR` | **当前 skill 的安装目录** | `/home/user/myproject/.agents/skills/gerrit-api`或者``/home/user/.agents/skills/gerrit-api`` | 该 skill 自带的脚本和文件 |
+| `$HOME`     | 用户主目录              | `/home/user`                                                                               | 全局配置、全局安装的 skill |
 
 > ❌ **错误做法：** 以 `pwd` 或相对路径调用 skill 脚本，或以 `pwd` 拼接配置文件路径。
 >
-> ✅ **正确做法：** 调用脚本时用 `$SKILL_DIR`，查找配置时用 `$SKILL_WORKSPACE`。
+> ✅ **正确做法：** 调用脚本时用 `$SKILL_DIR`，查找配置时用 `$WORKSPACE`。
 
 ---
 
@@ -81,17 +84,17 @@ triggers:
 
 ### Step 1 — 记录 Workspace
 
-> **为什么：** 如果之后执行了 `cd`，`pwd` 会变化，但 `SKILL_WORKSPACE` 不变。
+> **为什么：** 如果之后执行了 `cd`，`pwd` 会变化，但 `WORKSPACE` 不变。
 
 ```bash
 # Linux / macOS / Git Bash
-export SKILL_WORKSPACE="$(pwd)"
+export WORKSPACE="$(pwd)"
 
 # Windows CMD
-set SKILL_WORKSPACE=%CD%
+set WORKSPACE=%CD%
 
 # Windows PowerShell
-$env:SKILL_WORKSPACE = (Get-Location).Path
+$env:WORKSPACE = (Get-Location).Path
 ```
 
 **记住：一旦设置，整个会话中不要再修改它。**
@@ -112,7 +115,7 @@ import os, sys
 from pathlib import Path
 
 skill_name = "your-skill-name"  # ← 替换为实际 skill 名称
-ws = Path(os.environ.get("SKILL_WORKSPACE", os.getcwd()))
+ws = Path(os.environ.get("WORKSPACE", os.getcwd()))
 
 search_paths = [
     ws / ".agents" / "skills" / skill_name,       # workspace-local 安装
@@ -138,7 +141,7 @@ export SKILL_DIR=$(python3 -c "
 import os, sys
 from pathlib import Path
 name = 'gerrit-api'
-ws = Path(os.environ.get('SKILL_WORKSPACE', os.getcwd()))
+ws = Path(os.environ.get('WORKSPACE', os.getcwd()))
 for p in [ws/'.agents'/'skills'/name, Path.home()/'.agents'/'skills'/name]:
     if p.is_dir():
         print(p); sys.exit(0)
@@ -148,7 +151,7 @@ sys.exit(1)
 # Windows PowerShell
 $skillName = 'gerrit-api'
 $env:SKILL_DIR = @(
-    "$env:SKILL_WORKSPACE\.agents\skills\$skillName",
+    "$env:WORKSPACE\.agents\skills\$skillName",
     "$HOME\.agents\skills\$skillName"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $env:SKILL_DIR) { Write-Error "Skill '$skillName' not found" }
@@ -165,9 +168,9 @@ if (-not $env:SKILL_DIR) { Write-Error "Skill '$skillName' not found" }
 python3 -c "
 import os
 from pathlib import Path
-ws = os.environ.get('SKILL_WORKSPACE', '')
+ws = os.environ.get('WORKSPACE', '')
 sd = os.environ.get('SKILL_DIR', '')
-print('SKILL_WORKSPACE:', ws or '[未设置]', '  exists:', Path(ws).is_dir() if ws else False)
+print('WORKSPACE:', ws or '[未设置]', '  exists:', Path(ws).is_dir() if ws else False)
 print('SKILL_DIR      :', sd or '[未设置]', '  exists:', Path(sd).is_dir() if sd else False)
 "
 ```
@@ -181,20 +184,22 @@ print('SKILL_DIR      :', sd or '[未设置]', '  exists:', Path(sd).is_dir() if
 
 > **v2.0+ 路径约定：** 从 skill v2.0 起，各 skill 的 SKILL.md 中会注明路径约定，例如：`scripts/...` 路径均相对于本 Skill 目录（`.agents/skills/<skill-name>/`）。OpenClaw 等平台会自动将 skill 目录加入 PATH，直接使用 `scripts/...` 即可。
 
+> **示例说明：** 以下示例以 gerrit-api skill 的 `gerrit_api.py` 脚本为例，演示各种路径写法。`scripts/xxx.py` 代表任意 skill 脚本。
+
 ```bash
 # ✅ 正确（v2.0+ 路径约定，OpenClaw 自动解析）
-python3 scripts/gerrit_api.py query "status:open"
+python3 scripts/gerrit_api.py query "status:open"   # 示意: gerrit-api skill 脚本
 
 # ✅ 正确（需要 SKILL_DIR 时）
 python3 "$SKILL_DIR/scripts/gerrit_api.py" query "status:open"
 
-# ❌ 错误 — SKILL_WORKSPACE 是项目目录，不是 skill 目录
-python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open"
+# ❌ 错误 — WORKSPACE 是项目目录，不是 skill 目录
+python3 "$WORKSPACE/scripts/gerrit_api.py" query "status:open"
 ```
 
 ### 规则 2：读取/创建配置文件 → 用环境变量或 JSON 配置文件
 
-> **v2.0+ 推荐：** 支持 JSON 配置文件和环境变量两种方式，配置文件优先级更高。配置文件路径：`$SKILL_WORKSPACE/.config/{skill-name}.json` 或 `~/.config/{skill-name}.json`。详见 [规范 12](#rule-12)。
+> **v2.0+ 推荐：** 支持 JSON 配置文件和环境变量两种方式，配置文件优先级更高。配置文件路径：`$WORKSPACE/.config/{skill-name}.json` 或 `~/.config/{skill-name}.json`。详见 [规范 12](#rule-12)。
 
 ```bash
 # ✅ 正确（v2.0+ 环境变量，仍完整支持）
@@ -203,7 +208,7 @@ export GERRIT_USERNAME="john.doe"
 export GERRIT_HTTP_PASSWORD="your-http-token"
 
 # ✅ 正确（v2.0+ 配置文件，优先级更高）
-# 创建 $SKILL_WORKSPACE/.config/gerrit-api.json：
+# 创建 $WORKSPACE/.config/gerrit-api.json：
 # { "GERRIT_URL": "...", "GERRIT_USERNAME": "...", "GERRIT_HTTP_PASSWORD": "..." }
 ```
 
@@ -236,13 +241,13 @@ def _load_file_config(skill_name: str, workspace: str | None = None) -> dict:
 # 读取：cfg.get("GERRIT_URL") or os.environ.get("GERRIT_URL", "")
 ```
 
-> **推荐配置文件位置（v2.0+）：** `$SKILL_WORKSPACE/.config/{skill-name}.json`
+> **推荐配置文件位置（v2.0+）：** `$WORKSPACE/.config/{skill-name}.json`
 
-### 规则 4：输出文件和日志 → 用 `$SKILL_WORKSPACE`
+### 规则 4：输出文件和日志 → 用 `$WORKSPACE`
 
 ```bash
-# ✅ 正确 — 输出到项目目录
-python3 "$SKILL_DIR/scripts/stream.py" --output "$SKILL_WORKSPACE/events.jsonl"
+# ✅ 正确 — 输出到项目目录（示意: stream.py 代表任意有输出参数的 skill 脚本）
+python3 "$SKILL_DIR/scripts/stream.py" --output "$WORKSPACE/events.jsonl"
 
 # ❌ 错误
 python3 "$SKILL_DIR/scripts/stream.py" --output events.jsonl
@@ -255,13 +260,13 @@ python3 "$SKILL_DIR/scripts/stream.py" --output events.jsonl
 
 在调用任何 skill 的命令之前，依次确认：
 
-- [ ] `SKILL_WORKSPACE` 已设置为项目根目录的**绝对路径**
+- [ ] `WORKSPACE` 已设置为项目根目录的**绝对路径**
 - [ ] `SKILL_DIR` 已指向目标 skill 的**安装目录绝对路径**
 - [ ] `python3 --version` 输出 ≥ 3.9（部分 skill 要求）
-- [ ] skill 要求的配置文件已存在（路径：`$SKILL_WORKSPACE/.config/{skill-name}.json`，或环境变量已设置）
+- [ ] skill 要求的配置文件已存在（路径：`$WORKSPACE/.config/{skill-name}.json`，或环境变量已设置）
 - [ ] 所有脚本调用使用 `python3 "$SKILL_DIR/scripts/..."` 形式
-- [ ] 所有配置/输出路径使用 `"$SKILL_WORKSPACE/..."` 形式
-- [ ] 如果即将执行 `cd`：确保 `SKILL_WORKSPACE` 和 `SKILL_DIR` 已提前设置
+- [ ] 所有配置/输出路径使用 `"$WORKSPACE/..."` 形式
+- [ ] 如果即将执行 `cd`：确保 `WORKSPACE` 和 `SKILL_DIR` 已提前设置
 
 ---
 
@@ -278,8 +283,8 @@ python3 "$SKILL_DIR/scripts/stream.py" --output events.jsonl
 # 检查当前目录
 pwd
 
-# 检查是否和 SKILL_WORKSPACE 一致
-echo $SKILL_WORKSPACE
+# 检查是否和 WORKSPACE 一致
+echo $WORKSPACE
 
 # 如果不一致，重新设置（但要保持原来的值！）
 # 不要用 "$(pwd)" — 此时 pwd 已经是错误的目录
@@ -292,7 +297,7 @@ echo $SKILL_WORKSPACE
 <a name="error-2"></a>
 ### 错误 2：Config file not found / 配置文件未加载
 
-**原因：** 配置文件不在搜索路径上，或 `SKILL_WORKSPACE` 指向错误目录。
+**原因：** 配置文件不在搜索路径上，或 `WORKSPACE` 指向错误目录。
 
 **排查步骤：**
 ```python
@@ -302,7 +307,7 @@ from pathlib import Path
 
 skill_name = "gerrit-api"
 config_filename = "gerrit_config.json"
-ws = Path(os.environ.get("SKILL_WORKSPACE", os.getcwd()))
+ws = Path(os.environ.get("WORKSPACE", os.getcwd()))
 sd = Path(os.environ.get("SKILL_DIR", "."))
 home = Path.home()
 
@@ -336,7 +341,7 @@ for p in candidates:
 python3 --version
 
 # 始终使用 "python3 script.py" 形式，不要直接执行 "./script.py"
-# ✅ 正确
+# ✅ 正确（示意: poll_events.py 代表任意 skill 脚本）
 python3 "$SKILL_DIR/scripts/poll_events.py"
 
 # ❌ 可能失败
@@ -390,10 +395,10 @@ python3 script.py review 123 current '{"message": "it's fine"}'
 ```python
 # ✅ 正确（跨平台）
 from pathlib import Path
-config = Path(os.environ["SKILL_WORKSPACE"]) / "config" / "myconfig.json"
+config = Path(os.environ["WORKSPACE"]) / "config" / "myconfig.json"
 
 # ❌ 错误（仅 Linux）
-config = os.environ["SKILL_WORKSPACE"] + "/config/myconfig.json"
+config = os.environ["WORKSPACE"] + "/config/myconfig.json"
 ```
 
 ---
@@ -409,7 +414,7 @@ config = os.environ["SKILL_WORKSPACE"] + "/config/myconfig.json"
 
 ```bash
 # 每次调用脚本时带上 --workspace 参数（显式，不依赖环境变量）
-python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
+python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$WORKSPACE"
 ```
 
 ---
@@ -423,8 +428,8 @@ python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
 
 ```bash
 # ✅ Linux / macOS / Git Bash
-export GERRIT_API_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/gerrit-api"
-export CODE_REVIEW_SKILL_DIR="$SKILL_WORKSPACE/.agents/skills/code-review"
+export GERRIT_API_SKILL_DIR="$WORKSPACE/.agents/skills/gerrit-api"
+export CODE_REVIEW_SKILL_DIR="$WORKSPACE/.agents/skills/code-review"
 
 # 调用时明确指定
 python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" ...
@@ -433,8 +438,8 @@ python3 "$CODE_REVIEW_SKILL_DIR/scripts/check_env.py" ...
 
 ```powershell
 # ✅ Windows PowerShell
-$env:GERRIT_API_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\gerrit-api"
-$env:CODE_REVIEW_SKILL_DIR = "$env:SKILL_WORKSPACE\.agents\skills\code-review"
+$env:GERRIT_API_SKILL_DIR = "$env:WORKSPACE\.agents\skills\gerrit-api"
+$env:CODE_REVIEW_SKILL_DIR = "$env:WORKSPACE\.agents\skills\code-review"
 
 # 调用时明确指定
 python "$env:GERRIT_API_SKILL_DIR\scripts\gerrit_api.py" ...
@@ -443,8 +448,8 @@ python "$env:CODE_REVIEW_SKILL_DIR\scripts\check_env.py" ...
 
 ```batch
 :: ✅ Windows CMD
-set GERRIT_API_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\gerrit-api
-set CODE_REVIEW_SKILL_DIR=%SKILL_WORKSPACE%\.agents\skills\code-review
+set GERRIT_API_SKILL_DIR=%WORKSPACE%\.agents\skills\gerrit-api
+set CODE_REVIEW_SKILL_DIR=%WORKSPACE%\.agents\skills\code-review
 
 python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" ...
 python "%CODE_REVIEW_SKILL_DIR%\scripts\check_env.py" ...
@@ -462,7 +467,7 @@ import os, sys
 from pathlib import Path
 
 skill_name = "gerrit-api"  # ← 替换
-ws = Path(os.environ.get("SKILL_WORKSPACE", os.getcwd()))
+ws = Path(os.environ.get("WORKSPACE", os.getcwd()))
 
 for p in [ws / ".agents" / "skills" / skill_name,
           Path.home() / ".agents" / "skills" / skill_name]:
@@ -496,9 +501,9 @@ print(f"\n[Python]  {sys.version}")
 print(f"[OS]      {platform.system()} {platform.release()}")
 
 # 关键目录
-ws = os.environ.get("SKILL_WORKSPACE", "")
+ws = os.environ.get("WORKSPACE", "")
 sd = os.environ.get("SKILL_DIR", "")
-print(f"\n[SKILL_WORKSPACE]  {ws or '[未设置]'}  "
+print(f"\n[WORKSPACE]  {ws or '[未设置]'}  "
       f"{'✅ exists' if ws and Path(ws).is_dir() else '❌ missing'}")
 print(f"[SKILL_DIR]        {sd or '[未设置]'}  "
       f"{'✅ exists' if sd and Path(sd).is_dir() else '❌ missing'}")
@@ -506,7 +511,7 @@ print(f"[HOME]             {Path.home()}")
 print(f"[pwd]              {os.getcwd()}")
 
 if ws and os.getcwd() != ws:
-    print(f"\n⚠️  WARNING: cwd != SKILL_WORKSPACE  (pwd 已变更)")
+    print(f"\n⚠️  WARNING: cwd != WORKSPACE  (pwd 已变更)")
 
 # 已安装的 skills
 ws_path = Path(ws) if ws else Path.cwd()
@@ -546,7 +551,7 @@ print("\n" + "=" * 60)
 
 | 变量 | 含义 | 示例 |
 |---|---|---|
-| `SKILL_WORKSPACE` | 项目工作目录 | `/home/user/myproject` |
+| `WORKSPACE` | 项目工作目录 | `/home/user/myproject` |
 | `SKILL_DIR` | Skill 安装目录 | `/home/user/.agents/skills/gerrit-api` |
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

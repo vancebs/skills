@@ -51,7 +51,7 @@ triggers:
 
 1. **设置知识库目录**（选择一种方式）
 
-   **方式 A — 配置文件（推荐）**：创建 `{workspace}/.config/claw-knowledge-base.json`（或 `~/.config/claw-knowledge-base.json`）：
+   **方式 A — 配置文件（推荐）**：创建 `$WORKSPACE/.config/claw-knowledge-base.json`（或 `~/.config/claw-knowledge-base.json`）：
    ```json
    { "KNOWLEDGE_BASE_DIR": "/path/to/your/knowledge-base" }
    ```
@@ -242,5 +242,58 @@ python3 scripts/init_dirs.py
 | `check_env.py` 检查 | ✅ 幂等 | 只读检查，可多次运行 |
 | 向已有文件追加内容 | ⚠️ 非幂等（无保护）| 重复运行会重复追加；调用方负责检查内容是否已存在 |
 | 创建新文件 | ❌ 非幂等 | 已存在时必须先读取再决定追加或跳过，不得覆盖 |
+
+---
+
+## 🔧 Troubleshooting
+
+| 症状 | 诊断 | 解决方案 |
+|---|---|---|
+| `KNOWLEDGE_BASE_DIR` 未设置 | `echo $KNOWLEDGE_BASE_DIR` 为空 | 创建配置文件或 `export KNOWLEDGE_BASE_DIR=...` |
+| `memory_search` 无结果 | 文件未被索引 | 检查 `openclaw.json` 中 `extraPaths` 是否包含 `KNOWLEDGE_BASE_DIR` |
+| `memory_search` 返回过期内容 | OpenClaw 索引未刷新 | 重启 OpenClaw agent 或等待自动重新索引 |
+| 写入权限拒绝 | 目录不可写 | `ls -la $KNOWLEDGE_BASE_DIR`，`chmod u+w` 修复 |
+| `init_dirs.py` 报错 | Python 版本 < 3.9 | `python3 --version` 确认；升级 Python 3.9+ |
+| `kb://` 路径解析失败 | `KNOWLEDGE_BASE_DIR` 含尾部斜杠 | 确保路径格式为 `/path/to/kb`（不含尾部 `/`） |
+| 新写入文件不出现在搜索结果 | 索引延迟 | 等待 10-30 秒；若长时间未出现，检查 `extraPaths` 配置 |
+| 文件写入后内容被覆盖 | 并发写同一文件 | 多 Agent 协作时使用唯一文件名（如加 agent 名或时间戳） |
+
+### 快速诊断命令
+
+```bash
+# 检查环境
+python3 scripts/check_env.py
+
+# 确认目录可读写
+ls -la "$KNOWLEDGE_BASE_DIR"
+
+# 查看已有文件
+find "$KNOWLEDGE_BASE_DIR" -name "*.md" | head -20
+
+# 验证 openclaw.json 配置
+cat openclaw.json | python3 -m json.tool | grep -A3 '"extraPaths"'
+```
+
+---
+
+## 📋 文件命名规范
+
+| 目录 | 命名格式 | 示例 |
+|---|---|---|
+| `code-review/` | `YYYY-MM-DD_<change_number>.md` | `2024-01-15_12345.md` |
+| `troubleshooting/` | `<problem-keyword>.md` | `gerrit-ssh-timeout.md` |
+| `architecture/` | `<component>-<aspect>.md` | `auth-service-overview.md` |
+| `temp/` | `<task>-<agent>-<id>.md` | `review-code-review-agent-12345.md` |
+| 通用规则 | 小写字母 + 连字符，≤ 128 字符 | — |
+
+---
+
+## 📦 依赖说明
+
+| 依赖 | 类型 | 说明 |
+|---|---|---|
+| OpenClaw 平台 | 运行时（必须） | `memory_search` API 由 OpenClaw 提供，非 OpenClaw 环境无法使用 |
+| Python 3.9+ | 运行时（可选） | 仅 `check_env.py` 和 `init_dirs.py` 需要，核心读写操作不依赖 Python |
+| `KNOWLEDGE_BASE_DIR` | 环境变量 | 指向知识库根目录，必须在 `openclaw.json` 或配置文件中设置 |
 
 ---

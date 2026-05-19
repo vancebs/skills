@@ -34,7 +34,7 @@ python3 "$SKILL_DIR/scripts/review_job.py" \
 
 | 占位符 | 示例值 | 说明 |
 |--------|--------|------|
-| `<WORKSPACE_PATH>` | `/home/user/myproject` | 绝对路径，对应 SKILL_WORKSPACE |
+| `<WORKSPACE_PATH>` | `/home/user/myproject` | 绝对路径，对应 WORKSPACE |
 | `<GERRIT_PROJECT_NAME>` | `platform/frameworks/base` | Gerrit 中的项目名，区分大小写 |
 | `<MAX_EVENTS>` | `10` | 每次运行处理的最大事件数，整数，默认 10 |
 ````

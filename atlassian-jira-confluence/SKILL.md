@@ -3,10 +3,8 @@ name: atlassian-jira-confluence
 description: >
   This skill should be used when the user asks to "create a Jira issue",
   "update Confluence page", "search issues with JQL", "add comment to ticket",
-  "get sprint info", "list Confluence spaces", "export page as PDF", or any
-  Jira/Confluence CRUD operation. Covers all Jira and Confluence REST operations
-  via atlassian-python-api. Always invoke before answering Jira or Confluence
-  questions, even without explicit mention.
+  "get sprint info", or "list Confluence spaces". Supports all Jira and
+  Confluence CRUD operations via atlassian-python-api SDK.
 keywords:
   - jira
   - confluence
@@ -59,7 +57,7 @@ Choose **one** of the two options below. Config file takes priority over env var
 
 **Option A — Config file (recommended for persistent setups)**
 
-Create `{workspace}/.config/atlassian-jira-confluence.json` (or `~/.config/atlassian-jira-confluence.json`):
+Create `$WORKSPACE/.config/atlassian-jira-confluence.json` (or `~/.config/atlassian-jira-confluence.json`):
 
 ```json
 {
@@ -195,7 +193,7 @@ print(jira.myself())
 
 ---
 
-## Initialize Clients (Copy-Paste This Into Your Script)
+## Initialize Clients (Code Template)
 
 Always use this code block so config-file priority is respected automatically.
 

@@ -40,7 +40,7 @@ HTTP hook:
   --hook-retries N      Max hook retries on 5xx/network error (default: 3)
   --hook-timeout SECS   HTTP request timeout in seconds (default: 3)
   --outbox PATH         Append undelivered events here
-                        (default: {workspace}/events.outbox.jsonl)
+                        (default: $WORKSPACE/events.outbox.jsonl)
 
 Daemon / process:
   --pid-file PATH       Write PID to PATH on startup; remove on clean exit

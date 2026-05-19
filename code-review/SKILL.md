@@ -45,7 +45,13 @@ triggers:
 
 ---
 
-> **路径约定**: `scripts/...` 路径均相对于 code-review Skill 目录（`.agents/skills/code-review/`）；`gerrit-api` 操作路径均相对于（`.agents/skills/gerrit-api/`）。
+> **路径约定**: `scripts/...` 路径均相对于 code-review Skill 目录（`.agents/skills/code-review/`）。  
+> `gerrit-api` 脚本路径通过变量 `GERRIT_API_SKILL_DIR` 引用，默认为 `.agents/skills/gerrit-api`（OpenClaw 标准安装路径）。
+
+```bash
+# OpenClaw 中 gerrit-api 的默认安装路径（通常已由平台自动设置）
+GERRIT_API_SKILL_DIR="${GERRIT_API_SKILL_DIR:-.agents/skills/gerrit-api}"
+```
 
 ## Step 1 — 环境检查（首次加载 skill 时运行一次）
 
@@ -76,7 +82,7 @@ python3 scripts/check_env.py
 
 **Option A — Config file**
 
-Create `{workspace}/.config/code-review.json` (or `~/.config/code-review.json`):
+Create `$WORKSPACE/.config/code-review.json` (or `~/.config/code-review.json`):
 
 ```json
 {
@@ -142,13 +148,13 @@ https://gerrit.example.com/#/c/12345/                              → 12345
 
 **通过 Change-Id 查询 change number：**
 ```bash
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
   query "change:Iabcdef1234567890abcdef1234567890abcdef12+limit:1"
 ```
 
 **通过 commit SHA 查询 change number：**
 ```bash
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
   query "commit:abc123def456+limit:1"
 ```
 
@@ -156,12 +162,12 @@ python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
 
 ### 阶段二 — 通过 gerrit-api 获取 Patch 数据
 
-以下命令全部使用 `gerrit-api` skill 的脚本（路径: `.agents/skills/gerrit-api/scripts/`）。
+以下命令全部使用 `gerrit-api` skill 的脚本（路径: `$GERRIT_API_SKILL_DIR/scripts/`）。
 
 #### 2A — 获取变更详情
 
 ```bash
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py get-change <change_number>
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" get-change <change_number>
 ```
 
 **从输出中提取：**
@@ -174,7 +180,7 @@ python3 .agents/skills/gerrit-api/scripts/gerrit_api.py get-change <change_numbe
 #### 2B — 列出变更文件
 
 ```bash
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py list-files <change_number>
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" list-files <change_number>
 ```
 
 输出为文件路径列表。跳过以下文件（对应 `skip_file_patterns` 配置）：
@@ -185,13 +191,13 @@ python3 .agents/skills/gerrit-api/scripts/gerrit_api.py list-files <change_numbe
 对 `list-files` 返回的每个文件路径执行：
 
 ```bash
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
   get-diff <change_number> "path/to/file.java"
 ```
 
 **Windows 将 `python3` 替换为 `python`，路径分隔符用 `%`：**
 ```batch
-python .agents\skills\gerrit-api\scripts\gerrit_api.py get-diff <change_number> "path/to/file.java"
+python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" get-diff <change_number> "path/to/file.java"  :: OpenClaw standard path
 ```
 
 收集所有文件的 diff 后，进入阶段三。
@@ -325,12 +331,12 @@ Code Review 报告
 
 ```bash
 # PASS：Verified=0，发布 comment
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
   review <change_number> current \
   '{"message": "<报告文本>", "labels": {"Verified": 0}, "tag": "code-review-agent"}'
 
 # FAIL：Verified=-1，发布 comment
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
   review <change_number> current \
   '{"message": "<报告文本>", "labels": {"Verified": -1}, "tag": "code-review-agent"}'
 ```
@@ -347,7 +353,7 @@ report = '''
 print(json.dumps({'message': report, 'labels': {'Verified': 0}, 'tag': 'code-review-agent'}))
 " > review_body.json
 
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
+python3 "$GERRIT_API_SKILL_DIR/scripts/gerrit_api.py" \
   review <change_number> current "$(cat review_body.json)"
 ```
 
@@ -361,7 +367,7 @@ $body = @{
     tag     = "code-review-agent"
 } | ConvertTo-Json -Compress
 
-python .agents\skills\gerrit-api\scripts\gerrit_api.py review <change_number> current $body
+python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" review <change_number> current $body
 ```
 
 **gerrit-api review 命令退出码：**

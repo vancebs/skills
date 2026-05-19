@@ -504,11 +504,11 @@ JSON 文件，key 为环境变量名，value 为对应值：
 
 | 优先级 | 路径 | 说明 |
 |---|---|---|
-| 1（最高）| `{workspace}/.config/{skill-name}.json` | 项目/agent 专属配置（多 agent 隔离） |
+| 1（最高）| `$WORKSPACE/.config/{skill-name}.json` | 项目/agent 专属配置（多 agent 隔离） |
 | 2 | `~/.config/{skill-name}.json` | 用户全局配置 |
 | 3（最低）| 环境变量 | 原有方式，仍完整支持 |
 
-> `{workspace}` 在 OpenClaw 中为 agent 工作目录（`Path.cwd()`），每个 agent 独立。
+> `$WORKSPACE` 在 OpenClaw 中为 agent 工作目录（`Path.cwd()`），每个 agent 独立。
 
 ---
 
@@ -567,7 +567,7 @@ def load_config(workspace: str | None = None):
     if not url:
         _die(
             "MY_SKILL_URL is not set.\n"
-            "  Option A (config file): create {workspace}/.config/my-skill.json\n"
+            "  Option A (config file): create $WORKSPACE/.config/my-skill.json\n"
             '    {"MY_SKILL_URL": "https://example.com", "MY_SKILL_TOKEN": "..."}\n'
             '  Option B (env var): export MY_SKILL_URL="https://example.com"'
         )
@@ -587,7 +587,7 @@ Choose **one** of the two options below. Config file takes priority over env var
 
 **Option A — Config file (recommended for persistent setups)**
 
-Create `{workspace}/.config/{skill-name}.json` (or `~/.config/{skill-name}.json`):
+Create `$WORKSPACE/.config/{skill-name}.json` (or `~/.config/{skill-name}.json`):
 
 \`\`\`json
 {
@@ -636,7 +636,7 @@ else:
 | 配置文件非必选 | 两种方式均可；不强制用户创建配置文件 |
 | 解析错误静默 | 配置文件格式错误时静默忽略，回退到环境变量，不崩溃 |
 | env var 命名 | 全大写 + 下划线，前缀加 skill 名（如 `GERRIT_URL`），避免与系统变量冲突 |
-| 多 agent 隔离 | 每个 agent 的 CWD 不同，`{workspace}/.config/` 路径天然隔离 |
+| 多 agent 隔离 | 每个 agent 的 CWD 不同，`$WORKSPACE/.config/` 路径天然隔离 |
 | `--workspace` 支持 | 脚本提供 `--workspace` 参数，允许覆盖 CWD 用于 config 搜索 |
 
 ---

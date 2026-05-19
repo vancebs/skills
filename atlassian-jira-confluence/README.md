@@ -20,7 +20,7 @@ pip install atlassian-python-api
 
 **方式 A — 配置文件（推荐）**
 
-创建 `$SKILL_WORKSPACE/.config/atlassian-jira-confluence.json`（或 `~/.config/atlassian-jira-confluence.json`）：
+创建 `$WORKSPACE/.config/atlassian-jira-confluence.json`（或 `~/.config/atlassian-jira-confluence.json`）：
 
 ```json
 {
@@ -61,7 +61,7 @@ from atlassian import Jira, Confluence
 
 
 def _load_skill_config(skill_name: str) -> dict:
-    """Load $SKILL_WORKSPACE/.config/{skill}.json or ~/.config/{skill}.json."""
+    """Load $WORKSPACE/.config/{skill}.json or ~/.config/{skill}.json."""
     for p in [Path.cwd() / ".config" / f"{skill_name}.json",
               Path.home() / ".config" / f"{skill_name}.json"]:
         if p.is_file():
