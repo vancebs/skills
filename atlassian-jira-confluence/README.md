@@ -14,59 +14,39 @@
 pip install atlassian-python-api
 ```
 
-### 配置文件（推荐）
+### 配置方式（选一）
 
-按以下优先级自动搜索配置文件 `.atlassian.json`：
+配置文件优先级高于环境变量。配置文件非必选——两种方式等价。
 
-| 优先级 | 路径 |
-|---|---|
-| 1（推荐） | `{workspace}/config/atlassian-jira-confluence/.atlassian.json` |
-| 2 | `{workspace}/config/.atlassian.json` |
-| 3 | `{workspace}/.atlassian.json` |
-| 4 | `{skill-dir}/.atlassian.json` |
-| 5 | `$HOME/.config/atlassian-jira-confluence/.atlassian.json` |
-| 6 | `$HOME/.config/.atlassian.json` |
-| 7 | `$HOME/.atlassian.json` |
+**方式 A — 配置文件（推荐）**
 
-创建推荐路径的配置文件：
-
-```bash
-mkdir -p config/atlassian-jira-confluence
-```
-
-配置文件格式：
+创建 `$SKILL_WORKSPACE/.config/atlassian-jira-confluence.json`（或 `~/.config/atlassian-jira-confluence.json`）：
 
 ```json
 {
-  "confluence": {
-    "url": "https://your-confluence.example.com",
-    "token": "your-pat-token",
-    "username": "you@example.com"
-  },
-  "jira": {
-    "url": "https://your-jira.example.com",
-    "token": "your-pat-token",
-    "username": "you@example.com"
-  }
+  "JIRA_URL": "https://your-jira.example.com",
+  "JIRA_PAT_TOKEN": "your-pat-token",
+  "JIRA_USERNAME": "you@example.com",
+  "CONFLUENCE_URL": "https://your-confluence.example.com",
+  "CONFLUENCE_PAT_TOKEN": "your-pat-token",
+  "CONFLUENCE_USERNAME": "you@example.com"
 }
 ```
 
-> `username` 仅 Atlassian Cloud（`.atlassian.net` URL）需要，填写邮箱地址。
+> `*_USERNAME` 仅 Atlassian Cloud（`.atlassian.net`）需要，填写邮箱地址。
 
-### 环境变量（回退）
+**方式 B — 环境变量**
 
-| 环境变量 | 说明 |
-|---|---|
-| `CONFLUENCE_URL` | Confluence 实例 URL |
-| `CONFLUENCE_PAT_TOKEN` | Confluence Personal Access Token |
-| `CONFLUENCE_USERNAME` | Confluence 用户名（Cloud 必填） |
-| `JIRA_URL` | Jira 实例 URL |
-| `JIRA_PAT_TOKEN` | Jira Personal Access Token |
-| `JIRA_USERNAME` | Jira 用户名（Cloud 必填） |
+```bash
+export JIRA_URL="https://your-jira.example.com"
+export JIRA_PAT_TOKEN="your-pat-token"
+export JIRA_USERNAME="you@example.com"          # Cloud only
+export CONFLUENCE_URL="https://your-confluence.example.com"
+export CONFLUENCE_PAT_TOKEN="your-pat-token"
+export CONFLUENCE_USERNAME="you@example.com"    # Cloud only
+```
 
 ### 环境检测
-
-运行以下脚本可验证 SDK 安装和凭据配置：
 
 ```bash
 python scripts/setup_check.py
@@ -75,47 +55,50 @@ python scripts/setup_check.py
 ### 初始化客户端（代码模板）
 
 ```python
-import os, json
+import json, os
 from pathlib import Path
 from atlassian import Jira, Confluence
 
-_SKILL_NAME = "atlassian-jira-confluence"
-_CONFIG_FILENAME = ".atlassian.json"
 
-def load_config():
-    workspace = Path(os.getcwd())
-    home = Path.home()
-    candidates = [
-        workspace / "config" / _SKILL_NAME / _CONFIG_FILENAME,
-        workspace / "config" / _CONFIG_FILENAME,
-        workspace / _CONFIG_FILENAME,
-        home / ".config" / _SKILL_NAME / _CONFIG_FILENAME,
-        home / ".config" / _CONFIG_FILENAME,
-        home / _CONFIG_FILENAME,
-    ]
-    for path in candidates:
-        if path.is_file():
-            with open(path) as fh:
-                return json.load(fh)
+def _load_skill_config(skill_name: str) -> dict:
+    """Load $SKILL_WORKSPACE/.config/{skill}.json or ~/.config/{skill}.json."""
+    for p in [Path.cwd() / ".config" / f"{skill_name}.json",
+              Path.home() / ".config" / f"{skill_name}.json"]:
+        if p.is_file():
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                return d if isinstance(d, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                pass
     return {}
 
+
+def _is_cloud(url: str) -> bool:
+    return "atlassian.net" in url
+
+
 def get_jira():
-    cfg = load_config().get("jira", {})
-    url   = cfg.get("url")   or os.environ.get("JIRA_URL", "")
-    token = cfg.get("token") or os.environ.get("JIRA_PAT_TOKEN", "")
-    username = cfg.get("username") or os.environ.get("JIRA_USERNAME", "")
-    cloud = "atlassian.net" in url
-    return Jira(url=url, username=username, password=token, cloud=True) if cloud \
-        else Jira(url=url, token=token)
+    cfg   = _load_skill_config("atlassian-jira-confluence")
+    url   = (cfg.get("JIRA_URL") or os.environ.get("JIRA_URL", "")).strip().rstrip("/")
+    token = (cfg.get("JIRA_PAT_TOKEN") or os.environ.get("JIRA_PAT_TOKEN", "")).strip()
+    user  = (cfg.get("JIRA_USERNAME") or os.environ.get("JIRA_USERNAME", "")).strip()
+    if not url or not token:
+        raise EnvironmentError("Jira credentials missing. See SKILL.md Setup Checklist.")
+    if _is_cloud(url):
+        return Jira(url=url, username=user, password=token, cloud=True)
+    return Jira(url=url, token=token)
+
 
 def get_confluence():
-    cfg = load_config().get("confluence", {})
-    url   = cfg.get("url")   or os.environ.get("CONFLUENCE_URL", "")
-    token = cfg.get("token") or os.environ.get("CONFLUENCE_PAT_TOKEN", "")
-    username = cfg.get("username") or os.environ.get("CONFLUENCE_USERNAME", "")
-    cloud = "atlassian.net" in url
-    return Confluence(url=url, username=username, password=token, cloud=True) if cloud \
-        else Confluence(url=url, token=token)
+    cfg   = _load_skill_config("atlassian-jira-confluence")
+    url   = (cfg.get("CONFLUENCE_URL") or os.environ.get("CONFLUENCE_URL", "")).strip().rstrip("/")
+    token = (cfg.get("CONFLUENCE_PAT_TOKEN") or os.environ.get("CONFLUENCE_PAT_TOKEN", "")).strip()
+    user  = (cfg.get("CONFLUENCE_USERNAME") or os.environ.get("CONFLUENCE_USERNAME", "")).strip()
+    if not url or not token:
+        raise EnvironmentError("Confluence credentials missing. See SKILL.md Setup Checklist.")
+    if _is_cloud(url):
+        return Confluence(url=url, username=user, password=token, cloud=True)
+    return Confluence(url=url, token=token)
 ```
 
 ---

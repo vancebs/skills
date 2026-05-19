@@ -194,7 +194,7 @@ python3 "$SKILL_WORKSPACE/scripts/gerrit_api.py" query "status:open"
 
 ### 规则 2：读取/创建配置文件 → 用环境变量或 JSON 配置文件
 
-> **v2.0+ 推荐：** 支持 JSON 配置文件和环境变量两种方式，配置文件优先级更高。配置文件路径：`{workspace}/.config/{skill-name}.json` 或 `~/.config/{skill-name}.json`。详见 [规范 12](#rule-12)。
+> **v2.0+ 推荐：** 支持 JSON 配置文件和环境变量两种方式，配置文件优先级更高。配置文件路径：`$SKILL_WORKSPACE/.config/{skill-name}.json` 或 `~/.config/{skill-name}.json`。详见 [规范 12](#rule-12)。
 
 ```bash
 # ✅ 正确（v2.0+ 环境变量，仍完整支持）
@@ -203,7 +203,7 @@ export GERRIT_USERNAME="john.doe"
 export GERRIT_HTTP_PASSWORD="your-http-token"
 
 # ✅ 正确（v2.0+ 配置文件，优先级更高）
-# 创建 {workspace}/.config/gerrit-api.json：
+# 创建 $SKILL_WORKSPACE/.config/gerrit-api.json：
 # { "GERRIT_URL": "...", "GERRIT_USERNAME": "...", "GERRIT_HTTP_PASSWORD": "..." }
 ```
 
@@ -236,7 +236,7 @@ def _load_file_config(skill_name: str, workspace: str | None = None) -> dict:
 # 读取：cfg.get("GERRIT_URL") or os.environ.get("GERRIT_URL", "")
 ```
 
-> **推荐配置文件位置（v2.0+）：** `{workspace}/.config/{skill-name}.json`
+> **推荐配置文件位置（v2.0+）：** `$SKILL_WORKSPACE/.config/{skill-name}.json`
 
 ### 规则 4：输出文件和日志 → 用 `$SKILL_WORKSPACE`
 
@@ -258,7 +258,7 @@ python3 "$SKILL_DIR/scripts/stream.py" --output events.jsonl
 - [ ] `SKILL_WORKSPACE` 已设置为项目根目录的**绝对路径**
 - [ ] `SKILL_DIR` 已指向目标 skill 的**安装目录绝对路径**
 - [ ] `python3 --version` 输出 ≥ 3.9（部分 skill 要求）
-- [ ] skill 要求的配置文件已存在（路径：`$SKILL_WORKSPACE/config/{skill-name}/`）
+- [ ] skill 要求的配置文件已存在（路径：`$SKILL_WORKSPACE/.config/{skill-name}.json`，或环境变量已设置）
 - [ ] 所有脚本调用使用 `python3 "$SKILL_DIR/scripts/..."` 形式
 - [ ] 所有配置/输出路径使用 `"$SKILL_WORKSPACE/..."` 形式
 - [ ] 如果即将执行 `cd`：确保 `SKILL_WORKSPACE` 和 `SKILL_DIR` 已提前设置
