@@ -1,27 +1,84 @@
 ---
 name: skill-guide
 description: >
-  Meta-guide for correctly invoking agent skills. Addresses common failure modes
-  in weaker LLM models: broken file paths when cwd changes, wrong Python
-  executable, shell quoting issues, missing prerequisite checks, and more.
-  Load this skill whenever you are using any other skill, especially if you
-  encounter unexpected errors.
-keywords: [skill, guide, path, workspace, configuration, troubleshooting]
+  Two-in-one reference for working with agent skills.
+  PART 1 (skill usage): Correct invocation patterns, path rules, env var setup,
+  and troubleshooting for all skills — load when using any skill or encountering
+  path/config errors.
+  PART 2 (skill authoring): Canonical rules for writing new skills so that even
+  weaker LLM models can execute them correctly — load when creating or improving
+  a skill.
+keywords:
+  - skill
+  - guide
+  - path
+  - workspace
+  - configuration
+  - troubleshooting
+  - skill-authoring
+  - skill-creation
+  - check_env
+  - SKILL_DIR
+  - harness engineering
+triggers:
+  - skill-guide
+  - skill 创建规范
+  - skill authoring
+  - 路径错误
+  - FileNotFoundError
+  - 配置未加载
+  - SKILL_DIR
+  - check_env
 ---
 
-# Skill 使用指引（Skill Guide）
+# Skill Guide
 
-**本 Skill 的目的：** 帮助 agent 正确调用其他 skill，避免能力较弱的模型常见错误。
+> **两大功能 — 按需跳转：**
+> - 📖 **调用 skill 时遇到问题** → [PART 1 — 调用指引](#part-1)
+> - ✏️ **创建或改进 skill** → [PART 2 — 创建规范](#part-2)
 
-**何时需要阅读本指引：**
-- 首次使用任何 skill 时
-- 遇到"文件找不到"、"配置未加载"等路径相关错误时
-- 在会话中执行了 `cd` 之后调用 skill 时
-- 跨平台（Windows / Linux / macOS）使用 skill 时
+<a name="index"></a>
+## 📌 功能索引（读本文档前先看这里）
+
+### PART 1 快速导航
+
+| 问题 / 目标 | 跳转 |
+|---|---|
+| 首次使用某个 skill，不知从何开始 | [§ 1.2 会话初始化](#section-1-2) |
+| 执行了 `cd` 后脚本报错 / 路径找不到 | [§ 1.1 核心概念](#section-1-1)、[§ 错误 1](#error-1) |
+| 配置文件没有被加载 | [§ 错误 2](#error-2) |
+| 同时使用多个 skill，变量冲突 | [§ 错误 7](#error-7) |
+| Skill 未安装，不知如何安装 | [§ 错误 8](#error-8) |
+| 需要跨平台（Windows）使用 | [§ 1.3 规则 3–4](#section-1-3)、[§ 错误 5](#error-5) |
+| 脚本没有执行权限 | [§ 错误 3](#error-3) |
+| JSON 参数传入 shell 被截断 | [§ 错误 4](#error-4) |
+| 快速查命令、变量一览 | [§ 1.7 快速参考卡](#section-1-7) |
+
+### PART 2 快速导航
+
+| 目标 | 跳转 |
+|---|---|
+| 了解 skill 编写原则 | [§ 2.0 原则总览](#section-2-0) |
+| SKILL.md 文档结构模板 | [§ 规范 2](#rule-2) |
+| 让脚本代替模型执行操作 | [§ 规范 3 脚本优先](#rule-3) |
+| 业务流程 Mermaid 图 + Checklist | [§ 规范 5](#rule-5) |
+| check_env.py 要求 | [§ 规范 8](#rule-8) |
+| OpenClaw cron / 进程管理 prompt | [§ 规范 10](#rule-10) |
+| 声明约束和非正常路径 | [§ 规范 11（Harness Engineering）](#rule-11) |
+| 创建 skill 前自查清单 | [§ 11.5 自检 Checklist](#section-11-5) |
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ---
 
-## ⚠️ 关键概念：三个根目录
+<a name="part-1"></a>
+## PART 1 — Skill 调用指引
+
+> 本部分帮助 agent 正确调用已安装的 skill，解决路径、配置、跨平台等常见问题。
+> **何时需要：** 首次使用任何 skill 时；遇到路径/配置错误时；cd 后调用 skill 时。
+
+<a name="section-1-1"></a>
+### 1.1 核心概念：三个根目录
 
 在调用 skill 时，始终需要区分以下三个不同的目录。**混淆它们是能力较弱的模型最常见的错误来源。**
 
@@ -37,7 +94,8 @@ keywords: [skill, guide, path, workspace, configuration, troubleshooting]
 
 ---
 
-## ✅ 每次会话开始必做（Pre-session Checklist）
+<a name="section-1-2"></a>
+### 1.2 会话初始化（Pre-session Checklist）
 
 在使用任何 skill 之前，**必须**完成以下步骤。这是所有后续操作的基础。
 
@@ -61,6 +119,10 @@ $env:SKILL_WORKSPACE = (Get-Location).Path
 ### Step 2 — 确认 Skill 安装目录
 
 对每一个即将使用的 skill，检测并设置其 `SKILL_DIR`。
+
+> **⚠️ v2.0 起变化：** 各 skill 的 SKILL.md 不再包含 SKILL_DIR 检测代码，改用**路径约定**注释。
+> 若 agent 平台自动注入 SKILL_DIR，直接使用即可。
+> 手动检测方法（特殊需求时使用）见下方。
 
 **自动检测（推荐，跨平台）：**
 
@@ -132,7 +194,8 @@ print('SKILL_DIR      :', sd or '[未设置]', '  exists:', Path(sd).is_dir() if
 
 ---
 
-## 📍 文件路径使用规范
+<a name="section-1-3"></a>
+### 1.3 文件路径规范（规则 1–4）
 
 ### 规则 1：调用 Skill 自带脚本 → 用 `$SKILL_DIR` 或路径约定
 
@@ -205,7 +268,8 @@ python3 "$SKILL_DIR/scripts/stream.py" --output events.jsonl
 
 ---
 
-## 📋 调用 Skill 前逐项检查清单
+<a name="section-1-4"></a>
+### 1.4 调用前检查清单
 
 在调用任何 skill 的命令之前，依次确认：
 
@@ -219,8 +283,10 @@ python3 "$SKILL_DIR/scripts/stream.py" --output events.jsonl
 
 ---
 
-## 🐛 常见错误与修复
+<a name="section-1-5"></a>
+### 1.5 常见错误与修复（错误 1–8）
 
+<a name="error-1"></a>
 ### 错误 1：文件找不到（FileNotFoundError / No such file or directory）
 
 **原因：** 在会话中执行了 `cd`，导致相对路径失效。
@@ -241,6 +307,7 @@ echo $SKILL_WORKSPACE
 
 ---
 
+<a name="error-2"></a>
 ### 错误 2：Config file not found / 配置文件未加载
 
 **原因：** 配置文件不在搜索路径上，或 `SKILL_WORKSPACE` 指向错误目录。
@@ -276,6 +343,7 @@ for p in candidates:
 
 ---
 
+<a name="error-3"></a>
 ### 错误 3：Permission denied / 脚本无法执行
 
 **原因：** Python 脚本没有执行权限（Linux/macOS），或 Python 版本不对。
@@ -300,6 +368,7 @@ python "%SKILL_DIR%\scripts\poll_events.py"
 
 ---
 
+<a name="error-4"></a>
 ### 错误 4：shell 命令中 JSON 参数被截断或解析失败
 
 **原因：** 在 shell 的单引号字符串内使用了单引号（常见于 Python 字典的字符串键 `d['key']`）。
@@ -324,6 +393,7 @@ python3 script.py review 123 current '{"message": "it's fine"}'
 
 ---
 
+<a name="error-5"></a>
 ### 错误 5：跨平台路径分隔符问题（Windows）
 
 **规则：**
@@ -346,6 +416,7 @@ config = os.environ["SKILL_WORKSPACE"] + "/config/myconfig.json"
 
 ---
 
+<a name="error-6"></a>
 ### 错误 6：环境变量在子进程中丢失
 
 **原因：** `export VAR=value` 只在当前 shell 有效；某些 agent 框架的每次工具调用是独立的 shell 进程。
@@ -361,6 +432,7 @@ python3 "$SKILL_DIR/scripts/poll_events.py" --workspace "$SKILL_WORKSPACE"
 
 ---
 
+<a name="error-7"></a>
 ### 错误 7：同时使用多个 Skill — SKILL_DIR 冲突
 
 **原因：** 同时使用两个 skill 时，`SKILL_DIR` 只能指向一个。
@@ -398,6 +470,7 @@ python "%CODE_REVIEW_SKILL_DIR%\scripts\check_env.py" ...
 
 ---
 
+<a name="error-8"></a>
 ### 错误 8：Skill 未安装但尝试使用
 
 **排查：**
@@ -421,7 +494,8 @@ print(f"Install: npx skills add https://github.com/vancebs/skills --skill {skill
 
 ---
 
-## 🔍 通用诊断脚本
+<a name="section-1-6"></a>
+### 1.6 通用诊断脚本
 
 遇到任何 skill 相关问题时，运行此脚本获取完整诊断信息：
 
@@ -481,7 +555,8 @@ print("\n" + "=" * 60)
 
 ---
 
-## 📌 快速参考卡（Quick Reference Card）
+<a name="section-1-7"></a>
+### 1.7 快速参考卡
 
 打印并贴在显眼位置：
 
@@ -517,23 +592,24 @@ print("\n" + "=" * 60)
 └─────────────────────────────────────────────────────────┘
 ```
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ---
 
-## 🛠️ Skill 创建规范（Skill Authoring Guide）
+<a name="part-2"></a>
+## PART 2 — Skill 创建规范
 
-> **依赖说明：** 本节是对 **skill-creator** skill 的补充规范，聚焦于"如何让弱模型也能正确执行 skill"。
-> 使用 skill-creator 创建新 skill 时，请同时遵循本节规范。
+> 本部分为 skill 作者提供编写规范，目标：**让能力较弱的模型也能准确理解和执行 skill。**
 >
-> 安装 skill-creator（如未安装）：
+> **依赖说明：** 本节是对 **skill-creator** skill 的补充规范。创建 skill 时请同时使用 skill-creator：
 > ```
 > npx skills add skill-creator
 > ```
+>
+> **何时需要：** 创建新 skill 时；改进现有 skill 降低歧义时；审查 skill 质量时。
 
-本节为 skill 作者提供编写规范，目标：**让能力较弱的模型也能准确理解和执行 skill，减少歧义与执行偏差。**
-
----
-
-### 原则总览
+<a name="section-2-0"></a>
+### 2.0 原则总览
 
 | 原则               | 说明                                                                 |
 | ---------------- | ------------------------------------------------------------------ |
@@ -556,6 +632,7 @@ print("\n" + "=" * 60)
 
 ---
 
+<a name="rule-1"></a>
 ### 规范 1：文本表达
 
 **原则：** 简洁、明确、无歧义。一个语句只包含一个动作或条件。
@@ -581,6 +658,7 @@ SSH配置等，如果有问题的话按照提示来修复就好了。
 
 ---
 
+<a name="rule-2"></a>
 ### 规范 2：SKILL.md 文档结构
 
 每个 SKILL.md 应遵循以下固定结构（顺序不变）：
@@ -616,6 +694,7 @@ keywords: [关键词1, 关键词2, ...]
 
 ---
 
+<a name="rule-3"></a>
 ### 规范 3：脚本优先策略
 
 **原则：** 凡是可以确定性执行的操作（环境检查、文件写入、API 调用、格式转换），都应封装为脚本，让模型只需调用，不需要理解实现细节。
@@ -689,6 +768,7 @@ def is_process_alive(pid: int) -> bool:
 
 ---
 
+<a name="rule-4"></a>
 ### 规范 4：正则约束
 
 凡是 SKILL.md 中描述了"模型需要识别/匹配/提取某种格式"的地方，必须附上正则表达式。
@@ -725,6 +805,7 @@ def is_process_alive(pid: int) -> bool:
 
 ---
 
+<a name="rule-5"></a>
 ### 规范 5：业务流程描述
 
 **原则：** 每个业务流程必须包含以下三个要素：Checklist、Mermaid 流程图、异常处理表。
@@ -790,6 +871,7 @@ flowchart TD
 
 ---
 
+<a name="rule-6"></a>
 ### 规范 6：快速开始步骤格式
 
 每个 Step 必须包含以下结构（不得省略任何字段）：
@@ -818,6 +900,7 @@ flowchart TD
 
 ---
 
+<a name="rule-7"></a>
 ### 规范 7：其他降低歧义的方法
 
 #### 7.1 枚举值用列表，不用自然语言描述
@@ -905,6 +988,7 @@ mode 可以是测试或者正式模式，具体根据场景选择。
 
 ---
 
+<a name="rule-8"></a>
 ### 规范 8：Skill 自检脚本（check_env.py）要求
 
 每个有复杂依赖的 skill，**必须**提供 `scripts/check_env.py`，满足以下要求：
@@ -930,6 +1014,7 @@ Exit code:
 
 ---
 
+<a name="rule-9"></a>
 ### 规范 9：模板与参考（非脚本操作）
 
 **原则：** 凡是需要模型自行执行的命令、代码片段或配置，必须在 SKILL.md 中提供**完整可用的模板或示例**，不能仅靠自然语言描述让模型自行生成。
@@ -966,31 +1051,28 @@ python3 "$SKILL_DIR/scripts/review_job.py" \
 | `<MAX_EVENTS>` | `10` | 每次运行处理的最大事件数，整数，默认 10 |
 ````
 
-#### 9.3 配置文件示例规范
+#### 9.3 配置示例规范
 
-每个需要配置的 skill 必须提供 `scripts/config.json.example`，且：
-- 文件内的所有占位符值使用 `"<FIELD_NAME>"` 格式（字符串类型）或 `0` / `false`（数值/布尔类型）
-- 文件必须是合法 JSON（不含注释）
+env-var-only skills 不需要 `config.json.example`；若 skill 需要复杂配置，提供 `.env.example` 文件并附字段说明表。
+
+- env-var-only skill：在 SKILL.md 中列出环境变量名称、类型、是否必填、默认值和说明（见规范 7.5）
+- 需要复杂配置的 skill：提供 `.env.example`，其中占位符值使用 `<FIELD_NAME>` 格式
+- 示例文件必须是合法格式（`.env` 不含 shell 专属语法，JSON 示例不含注释）
 - SKILL.md 中必须有对应字段说明表（见规范 7.5）
 
-```json
-{
-  "gerrit": {
-    "host": "<GERRIT_HOST>",
-    "port": 29418,
-    "http_port": 8080,
-    "username": "<GERRIT_USERNAME>",
-    "http_password": "<HTTP_PASSWORD>"
-  },
-  "review": {
-    "test_mode": true,
-    "project_filter": ""
-  }
-}
+```dotenv
+GERRIT_HOST=<GERRIT_HOST>
+GERRIT_PORT=29418
+GERRIT_HTTP_PORT=8080
+GERRIT_USERNAME=<GERRIT_USERNAME>
+HTTP_PASSWORD=<HTTP_PASSWORD>
+REVIEW_TEST_MODE=true
+PROJECT_FILTER=
 ```
 
 ---
 
+<a name="rule-10"></a>
 ### 规范 10：Prompt 模板（限制模型自由操作空间）
 
 **原则：** 对于需要模型在特定 agent 平台（如 OpenClaw）执行的复杂操作，SKILL.md 必须提供**直接可用的 prompt 模板**，让模型只需填入少量参数即可，而不是自行理解并生成操作。
@@ -1150,6 +1232,7 @@ python3 "$SKILL_DIR/scripts/review_job.py" \
 
 ---
 
+<a name="rule-11"></a>
 ### 规范 11：Harness Engineering（非正常路径与约束声明）
 
 **原则：** 每个 skill 必须显式声明其约束、边界条件和非正常路径的处理方式。**"未声明"不等于"不会发生"**——弱模型会对未声明情况自行脑补，导致不可预期行为。
@@ -1228,6 +1311,7 @@ python3 "$SKILL_DIR/scripts/review_job.py" \
 
 ---
 
+<a name="section-11-5"></a>
 #### 11.5 Harness Engineering Checklist（创建 skill 时自查）
 
 在完成 SKILL.md 初稿后，逐项确认：
@@ -1241,6 +1325,25 @@ python3 "$SKILL_DIR/scripts/review_job.py" \
 
 ---
 
+<a name="constraints"></a>
+## ⛔ 约束与禁止事项
+
+> 本节是作者在具体 skill 文档中应保留的固定末尾结构；固定格式与说明也见 § 规范 11.1。
+
+### 不支持的场景（遇到时终止并告知用户）
+
+| 场景 | 原因 | 处理动作 |
+|---|---|---|
+| <场景描述> | <为何不支持> | <模型应执行的动作，如"停止并提示用户"> |
+
+### 明确禁止的操作（无论如何不得执行）
+
+- ⛔ <禁止的操作>：<原因>
+- ⛔ <禁止的操作>：<原因>
+
+---
+
+<a name="references"></a>
 ## 参考
 
 - 本仓库所有 skill 的 SKILL.md 均遵循以上规范
