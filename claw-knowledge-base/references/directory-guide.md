@@ -18,16 +18,16 @@ knowledge-base/
 
 ### 各目录使用说明
 
-| 目录 | 写入时机 | 典型文件名示例 |
-|---|---|---|
-| `architecture/` | 系统层级变更、新模块引入、重大架构决策 | `service-layer-overview.md` |
-| `coding-standards/` | 编码规范更新、新语言/框架规范建立 | `java-naming-rules.md` |
-| `troubleshooting/` | 反复出现的问题、排查步骤确认后 | `gerrit-ssh-connection-fail.md` |
-| `release-notes/` | 每个里程碑 / 版本发布后 | `v2.3.0-release-notes.md` |
-| `code-review/` | 存档 code review 报告（每次审查生成一份）| `2026-05-18_12345.md` |
-| `temp/` | agent 之间一次性文件传递 | `agent-a-to-b-handoff.md` |
-| `onboarding/` | 环境搭建、常用命令、项目结构说明 | `dev-environment-setup.md` |
-| `{agent_def_dir}/` | 各 agent 私有的持久化知识 | `<agent-name>-context.md` |
+| 目录                  | 写入时机                        | 典型文件名示例                         |
+| ------------------- | --------------------------- | ------------------------------- |
+| `architecture/`     | 系统层级变更、新模块引入、重大架构决策         | `service-layer-overview.md`     |
+| `coding-standards/` | 编码规范更新、新语言/框架规范建立           | `java-naming-rules.md`          |
+| `troubleshooting/`  | 反复出现的问题、排查步骤确认后             | `gerrit-ssh-connection-fail.md` |
+| `release-notes/`    | 每个里程碑 / 版本发布后               | `v2.3.0-release-notes.md`       |
+| `code-review/`      | 存档 code review 报告（每次审查生成一份） | `2026-05-18_12345.md`           |
+| `temp/`             | agent 之间一次性文件传递             | `agent-a-to-b-handoff.md`       |
+| `onboarding/`       | 环境搭建、常用命令、项目结构说明            | `dev-environment-setup.md`      |
+| `{agent_def_dir}/`  | 各 agent 私有的持久化知识            | `<agent-name>-context.md`       |
 
 ### `{agent_def_dir}` 命名规则
 

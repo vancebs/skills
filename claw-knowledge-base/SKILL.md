@@ -38,10 +38,23 @@ triggers:
 
 ## 🚀 Quick Start
 
-1. **设置知识库目录**
+1. **设置知识库目录**（选择一种方式）
+
+   **方式 A — 配置文件（推荐）**：创建 `{workspace}/.config/claw-knowledge-base.json`（或 `~/.config/claw-knowledge-base.json`）：
+   ```json
+   { "KNOWLEDGE_BASE_DIR": "/path/to/your/knowledge-base" }
+   ```
+
+   **方式 B — 环境变量**：
    ```bash
    export KNOWLEDGE_BASE_DIR="/path/to/your/knowledge-base"
    ```
+
+   也可在 `openclaw.json` 的 `env` 字段中设置：
+   ```json
+   { "env": { "KNOWLEDGE_BASE_DIR": "/path/to/your/knowledge-base" } }
+   ```
+
 2. **检查环境并初始化目录**
    ```bash
    python3 scripts/check_env.py
@@ -105,15 +118,15 @@ triggers:
 
 ### 不支持的场景
 
-| 场景 | 原因 | 处理动作 |
-|---|---|---|
-| 非 OpenClaw 平台使用本 skill | `memory_search` 不可用 | 停止并告知用户：本 skill 仅支持 OpenClaw |
-| `KNOWLEDGE_BASE_DIR` 未设置 | 无法定位知识库 | 停止，输出 Quick Start 操作指引 |
-| `KNOWLEDGE_BASE_DIR` 目录不可写 | 权限不足 | 停止，输出 `ls -la` 检查命令和权限修复建议 |
-| `openclaw.json` 未配置 `extraPaths` | 新文件不会被索引 | 不阻止写入，但输出 WARNING 提示用户完成 Quick Start 第 3 步 |
-| 写入非 `.md` 格式文件 | OpenClaw 索引不支持 | 拒绝写入，输出"仅支持 .md 文件" |
-| 单文件超过 1 MB | 影响索引性能 | 写入前检查大小；超限时建议拆分，不阻止但输出 WARNING |
-| `temp/` 目录下文件永久保留 | temp 目录用于临时传递 | 每次写入 temp/ 后，在文件头标注 `expires: YYYY-MM-DD`，agent 读取后负责删除 |
+| 场景                               | 原因                  | 处理动作                                                    |
+| -------------------------------- | ------------------- | ------------------------------------------------------- |
+| 非 OpenClaw 平台使用本 skill           | `memory_search` 不可用 | 停止并告知用户：本 skill 仅支持 OpenClaw                            |
+| `KNOWLEDGE_BASE_DIR` 未设置         | 无法定位知识库             | 停止，输出 Quick Start 操作指引                                  |
+| `KNOWLEDGE_BASE_DIR` 目录不可写       | 权限不足                | 停止，输出 `ls -la` 检查命令和权限修复建议                              |
+| `openclaw.json` 未配置 `extraPaths` | 新文件不会被索引            | 不阻止写入，但输出 WARNING 提示用户完成 Quick Start 第 3 步              |
+| 写入非 `.md` 格式文件                   | OpenClaw 索引不支持      | 拒绝写入，输出"仅支持 .md 文件"                                     |
+| 单文件超过 1 MB                       | 影响索引性能              | 写入前检查大小；超限时建议拆分，不阻止但输出 WARNING                          |
+| `temp/` 目录下文件永久保留                | temp 目录用于临时传递       | 每次写入 temp/ 后，在文件头标注 `expires: YYYY-MM-DD`，agent 读取后负责删除 |
 
 ### 明确禁止的操作
 

@@ -65,20 +65,32 @@ python3 scripts/check_env.py
 
 ---
 
-## Step 2 — Set Environment Variables (optional)
+## Step 2 — Configure (optional)
 
-```bash
-# Default: test_mode=true (print report only, no Gerrit posting)
-export CODE_REVIEW_TEST_MODE=false      # set to false to post to Gerrit
-export CODE_REVIEW_SKIP_PATTERNS="*.min.js,*.generated.*"  # comma-separated globs
+配置字段（均可选，有默认值）：
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `CODE_REVIEW_TEST_MODE` | `true` | `true` = 仅打印报告，不写 Gerrit；`false` = 发布 comment + Verified 标签 |
+| `CODE_REVIEW_SKIP_PATTERNS` | — | 跳过的文件 glob，逗号分隔，如 `*.md,*.xml,*.json` |
+
+**Option A — Config file**
+
+Create `{workspace}/.config/code-review.json` (or `~/.config/code-review.json`):
+
+```json
+{
+  "CODE_REVIEW_TEST_MODE": "false",
+  "CODE_REVIEW_SKIP_PATTERNS": "*.min.js,*.generated.*"
+}
 ```
 
-**配置字段说明：**
+**Option B — Environment variables**
 
-| 环境变量 | 必填 | 默认值 | 说明 |
-|---|---|---|---|
-| `CODE_REVIEW_TEST_MODE` | ❌ | `true` | `true` = 仅打印报告，不写 Gerrit；`false` = 发布 comment + Verified 标签 |
-| `CODE_REVIEW_SKIP_PATTERNS` | ❌ | — | 跳过的文件 glob，逗号分隔，如 `*.md,*.xml,*.json` |
+```bash
+export CODE_REVIEW_TEST_MODE=false
+export CODE_REVIEW_SKIP_PATTERNS="*.min.js,*.generated.*"
+```
 
 ### Dependencies
 

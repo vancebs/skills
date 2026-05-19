@@ -53,7 +53,26 @@ pip install atlassian-python-api
 
 It's safe to run multiple times.
 
-### Step 2 — Set Environment Variables
+### Step 2 — Configure Credentials
+
+Choose **one** of the two options below. Config file takes priority over env vars.
+
+**Option A — Config file (recommended for persistent setups)**
+
+Create `{workspace}/.config/atlassian-jira-confluence.json` (or `~/.config/atlassian-jira-confluence.json`):
+
+```json
+{
+  "JIRA_URL": "https://your-jira.example.com",
+  "JIRA_PAT_TOKEN": "your-pat-token",
+  "JIRA_USERNAME": "you@example.com",
+  "CONFLUENCE_URL": "https://your-confluence.example.com",
+  "CONFLUENCE_PAT_TOKEN": "your-pat-token",
+  "CONFLUENCE_USERNAME": "you@example.com"
+}
+```
+
+**Option B — Environment variables**
 
 ```bash
 # Confluence
@@ -67,10 +86,7 @@ export JIRA_PAT_TOKEN="your-pat-token"
 export JIRA_USERNAME="you@example.com"         # Cloud only
 ```
 
-> **PAT Token:** Personal Access Token. On Atlassian Cloud, generate at https://id.atlassian.com/manage-profile/security/api-tokens (use as password).  
-> **`*_USERNAME`** is only required for Atlassian Cloud (`.atlassian.net`).
-
-Windows CMD:
+Windows CMD / PowerShell:
 ```cmd
 set JIRA_URL=https://your-jira.example.com
 set JIRA_PAT_TOKEN=your-pat-token
@@ -78,13 +94,8 @@ set CONFLUENCE_URL=https://your-confluence.example.com
 set CONFLUENCE_PAT_TOKEN=your-pat-token
 ```
 
-Windows PowerShell:
-```powershell
-$env:JIRA_URL = "https://your-jira.example.com"
-$env:JIRA_PAT_TOKEN = "your-pat-token"
-$env:CONFLUENCE_URL = "https://your-confluence.example.com"
-$env:CONFLUENCE_PAT_TOKEN = "your-pat-token"
-```
+> **PAT Token:** Personal Access Token. On Atlassian Cloud, generate at https://id.atlassian.com/manage-profile/security/api-tokens (use as password).  
+> **`*_USERNAME`** is only required for Atlassian Cloud (`.atlassian.net`).
 
 ### Step 3 — Test the Connection
 
@@ -189,8 +200,22 @@ print(jira.myself())
 Always use this code block so config-file priority is respected automatically.
 
 ```python
-import os
+import json, os
+from pathlib import Path
 from atlassian import Jira, Confluence
+
+
+def _load_skill_config(skill_name: str) -> dict:
+    """Load {cwd}/.config/{skill}.json or ~/.config/{skill}.json."""
+    for p in [Path.cwd() / ".config" / f"{skill_name}.json",
+              Path.home() / ".config" / f"{skill_name}.json"]:
+        if p.is_file():
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                return d if isinstance(d, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {}
 
 
 def _is_cloud(url: str) -> bool:
@@ -198,14 +223,16 @@ def _is_cloud(url: str) -> bool:
 
 
 def get_jira():
-    """Return an authenticated Jira client using env vars."""
-    url   = os.environ.get("JIRA_URL", "").strip().rstrip("/")
-    token = os.environ.get("JIRA_PAT_TOKEN", "").strip()
-    user  = os.environ.get("JIRA_USERNAME", "").strip()
+    """Return authenticated Jira client (config file preferred, env vars fallback)."""
+    cfg   = _load_skill_config("atlassian-jira-confluence")
+    url   = (cfg.get("JIRA_URL") or os.environ.get("JIRA_URL", "")).strip().rstrip("/")
+    token = (cfg.get("JIRA_PAT_TOKEN") or os.environ.get("JIRA_PAT_TOKEN", "")).strip()
+    user  = (cfg.get("JIRA_USERNAME") or os.environ.get("JIRA_USERNAME", "")).strip()
     if not url or not token:
         raise EnvironmentError(
             "Jira credentials missing.\n"
-            "  Set JIRA_URL and JIRA_PAT_TOKEN environment variables."
+            "  Option 1: create .config/atlassian-jira-confluence.json with JIRA_URL and JIRA_PAT_TOKEN\n"
+            "  Option 2: set JIRA_URL and JIRA_PAT_TOKEN environment variables."
         )
     if _is_cloud(url):
         return Jira(url=url, username=user, password=token, cloud=True)
@@ -213,14 +240,16 @@ def get_jira():
 
 
 def get_confluence():
-    """Return an authenticated Confluence client using env vars."""
-    url   = os.environ.get("CONFLUENCE_URL", "").strip().rstrip("/")
-    token = os.environ.get("CONFLUENCE_PAT_TOKEN", "").strip()
-    user  = os.environ.get("CONFLUENCE_USERNAME", "").strip()
+    """Return authenticated Confluence client (config file preferred, env vars fallback)."""
+    cfg   = _load_skill_config("atlassian-jira-confluence")
+    url   = (cfg.get("CONFLUENCE_URL") or os.environ.get("CONFLUENCE_URL", "")).strip().rstrip("/")
+    token = (cfg.get("CONFLUENCE_PAT_TOKEN") or os.environ.get("CONFLUENCE_PAT_TOKEN", "")).strip()
+    user  = (cfg.get("CONFLUENCE_USERNAME") or os.environ.get("CONFLUENCE_USERNAME", "")).strip()
     if not url or not token:
         raise EnvironmentError(
             "Confluence credentials missing.\n"
-            "  Set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN environment variables."
+            "  Option 1: create .config/atlassian-jira-confluence.json with CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN\n"
+            "  Option 2: set CONFLUENCE_URL and CONFLUENCE_PAT_TOKEN environment variables."
         )
     if _is_cloud(url):
         return Confluence(url=url, username=user, password=token, cloud=True)

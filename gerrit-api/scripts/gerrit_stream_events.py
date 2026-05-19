@@ -8,7 +8,7 @@ endpoint.  Each event line is a self-contained JSON object enriched with
 _received_at and summary fields.
 
 Usage:
-  python3 gerrit_stream_events.py [options]
+  python3 gerrit_stream_events.py [--workspace PATH] [options]
 
 ─── File output ──────────────────────────────────────────────────────────────
   --output PATH         Append events to PATH as compact JSONL (one event per
@@ -21,7 +21,7 @@ Usage:
   --hook-url URL        POST each event as JSON to this URL.
                         Example: --hook-url http://127.0.0.1:8443/events
   --hook-token TOKEN    Sent as X-Auth-Token header. Never logged. Can also be
-                        set via env GERRIT_HOOK_TOKEN.
+                        set via config/env GERRIT_HOOK_TOKEN.
   --hook-retries N      Max retries on 5xx/network error (default: 3).
   --hook-timeout SECS   Per-request timeout in seconds (default: 3).
   --outbox PATH         On hook failure, append missed events here for later
@@ -51,7 +51,7 @@ Usage:
 ─── Misc ─────────────────────────────────────────────────────────────────────
   --help                Show this help.
 
-Credentials (env vars / CLI override priority: CLI > env):
+Credentials (CLI > config file > env priority):
   GERRIT_URL           (or GERRIT_SSH_HOST)  SSH hostname derived from GERRIT_URL
   GERRIT_SSH_HOST      SSH hostname override (--host)
   GERRIT_SSH_PORT      SSH port (--port, default: 29418)
@@ -140,17 +140,57 @@ log = logging.getLogger("gerrit_stream_events")
 _SKILL_NAME = "gerrit-api"
 
 
+# ─── Config loading ───────────────────────────────────────────────────────────
+
+def _load_file_config(workspace: str | None = None) -> dict:
+    """Load config from {workspace}/.config/gerrit-api.json or ~/.config/gerrit-api.json.
+
+    Returns a dict of {ENV_VAR_NAME: value} or empty dict if no config file found.
+    Config file format:
+      {
+        "GERRIT_URL": "https://gerrit.example.com",
+        "GERRIT_USERNAME": "john.doe",
+        "GERRIT_HTTP_PASSWORD": "secret"
+      }
+    """
+    import pathlib
+    candidates = []
+    if workspace:
+        candidates.append(pathlib.Path(workspace) / ".config" / "gerrit-api.json")
+    candidates.append(pathlib.Path.cwd() / ".config" / "gerrit-api.json")
+    candidates.append(pathlib.Path.home() / ".config" / "gerrit-api.json")
+
+    # Deduplicate while preserving order
+    seen = set()
+    search = []
+    for p in candidates:
+        rp = str(p.resolve()) if p.exists() else str(p)
+        if rp not in seen:
+            seen.add(rp)
+            search.append(p)
+
+    for path in search:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass  # Silently skip invalid/unreadable files
+    return {}
+
+
 # ─── SSH config loading ───────────────────────────────────────────────────────
 
-def _load_ssh_config(args: argparse.Namespace) -> dict:
-    """Build SSH config from CLI args and environment variables.
+def _load_ssh_config(args: argparse.Namespace, cfg: dict) -> dict:
+    """Build SSH config from CLI args, config file, and environment variables.
 
-    Priority: CLI arg > env var > derived value (host from GERRIT_URL).
+    Priority: CLI arg > config file > env var > derived value (host from GERRIT_URL).
     """
     # SSH host: --host > GERRIT_SSH_HOST > host from GERRIT_URL
-    host = getattr(args, "host", "") or os.environ.get("GERRIT_SSH_HOST", "")
+    host = getattr(args, "host", "") or cfg.get("GERRIT_SSH_HOST") or os.environ.get("GERRIT_SSH_HOST", "")
     if not host:
-        url = os.environ.get("GERRIT_URL", "")
+        url = cfg.get("GERRIT_URL") or os.environ.get("GERRIT_URL", "")
         if url:
             host = urllib.parse.urlparse(url).hostname or ""
 
@@ -159,7 +199,7 @@ def _load_ssh_config(args: argparse.Namespace) -> dict:
     if port_arg:
         port = port_arg
     else:
-        raw_port = os.environ.get("GERRIT_SSH_PORT", "")
+        raw_port = cfg.get("GERRIT_SSH_PORT") or os.environ.get("GERRIT_SSH_PORT", "")
         try:
             port = int(raw_port) if raw_port else 29418
         except ValueError:
@@ -168,12 +208,14 @@ def _load_ssh_config(args: argparse.Namespace) -> dict:
     # SSH username: --username > GERRIT_SSH_USERNAME > GERRIT_USERNAME
     username = (
         getattr(args, "username", "")
+        or cfg.get("GERRIT_SSH_USERNAME")
         or os.environ.get("GERRIT_SSH_USERNAME", "")
+        or cfg.get("GERRIT_USERNAME")
         or os.environ.get("GERRIT_USERNAME", "")
     )
 
     # SSH key: --key > GERRIT_SSH_KEY
-    key = getattr(args, "key", "") or os.environ.get("GERRIT_SSH_KEY", "")
+    key = getattr(args, "key", "") or cfg.get("GERRIT_SSH_KEY") or os.environ.get("GERRIT_SSH_KEY", "")
 
     return {
         "ssh_host":     host,
@@ -196,15 +238,17 @@ def build_ssh_command(cfg: dict) -> list[str]:
         raise RuntimeError(
             "SSH host could not be determined.\n"
             "  Set one of the following:\n"
-            "  1. export GERRIT_SSH_HOST=gerrit.example.com\n"
-            "  2. export GERRIT_URL=https://gerrit.example.com  (host is derived from it)"
+            "  1. Add GERRIT_SSH_HOST or GERRIT_URL to {workspace}/.config/gerrit-api.json\n"
+            "  2. export GERRIT_SSH_HOST=gerrit.example.com\n"
+            "  3. export GERRIT_URL=https://gerrit.example.com  (host is derived from it)"
         )
     if not user:
         raise RuntimeError(
             "SSH username could not be determined.\n"
             "  Set one of the following:\n"
-            "  1. export GERRIT_SSH_USERNAME=your-username\n"
-            "  2. export GERRIT_USERNAME=your-username  (ssh username defaults to it)"
+            "  1. Add GERRIT_SSH_USERNAME or GERRIT_USERNAME to {workspace}/.config/gerrit-api.json\n"
+            "  2. export GERRIT_SSH_USERNAME=your-username\n"
+            "  3. export GERRIT_USERNAME=your-username  (ssh username defaults to it)"
         )
 
     cmd = [
@@ -529,14 +573,14 @@ def _log_ssh_error(stderr_output: str, cfg: dict) -> None:
           or "connect to host" in stderr_lc
           or "no route to host" in stderr_lc):
         log.error("Cannot connect to %r port %s.", cfg.get("ssh_host"), cfg.get("ssh_port"))
-        log.error("Check GERRIT_SSH_HOST and GERRIT_SSH_PORT environment variables.")
+        log.error("Check GERRIT_SSH_HOST and GERRIT_SSH_PORT in config or environment.")
         log.error("Test: ssh -p %s %s@%s gerrit version",
                   cfg.get("ssh_port"), cfg.get("ssh_username"), cfg.get("ssh_host"))
     elif "not allowed" in stderr_lc or "access denied" in stderr_lc:
         log.error("This Gerrit account may lack 'Stream Events' capability.")
         log.error("Ask a Gerrit admin to grant it under Global Capabilities.")
     else:
-        log.warning("Verify env vars: GERRIT_SSH_HOST=%r, GERRIT_SSH_PORT=%s, GERRIT_SSH_USERNAME=%r",
+        log.warning("Verify config/env values: GERRIT_SSH_HOST=%r, GERRIT_SSH_PORT=%s, GERRIT_SSH_USERNAME=%r",
                     cfg.get("ssh_host"), cfg.get("ssh_port"), cfg.get("ssh_username"))
         log.warning("Test: ssh -p %s %s@%s gerrit version",
                     cfg.get("ssh_port"), cfg.get("ssh_username"), cfg.get("ssh_host"))
@@ -558,20 +602,21 @@ def stream_events(args: argparse.Namespace) -> int:
     """Main event streaming loop. Returns exit code."""
     _setup_logging(getattr(args, "verbose", False), args.quiet)
 
-    cfg = _load_ssh_config(args)
+    cfg = _load_file_config(getattr(args, "workspace", None))
+    ssh_cfg = _load_ssh_config(args, cfg)
 
     type_filter    = set(f.strip() for f in args.filter.split(",")  if f.strip()) if args.filter  else set()
     project_filter = set(p.strip() for p in args.project.split(",") if p.strip()) if args.project else set()
     branch_filter  = set(b.strip() for b in args.branch.split(",")  if b.strip()) if args.branch  else set()
 
     try:
-        ssh_cmd = build_ssh_command(cfg)
+        ssh_cmd = build_ssh_command(ssh_cfg)
     except RuntimeError as exc:
         log.error("%s", exc)
         return 1
 
     log.info("Connecting to %s@%s:%s …",
-             cfg.get("ssh_username"), cfg.get("ssh_host"), cfg.get("ssh_port"))
+             ssh_cfg.get("ssh_username"), ssh_cfg.get("ssh_host"), ssh_cfg.get("ssh_port"))
     if type_filter:
         log.info("Filtering event types: %s", sorted(type_filter))
     if project_filter:
@@ -584,13 +629,14 @@ def stream_events(args: argparse.Namespace) -> int:
     if not getattr(args, "no_output", False) and args.output:
         output_path = args.output
 
-    # ── Resolve hook settings (CLI > env) ────────────────────────────────────
-    hook_url   = args.hook_url   or os.environ.get("GERRIT_HOOK_URL",   "")
-    hook_token = args.hook_token or os.environ.get("GERRIT_HOOK_TOKEN", "")
+    # ── Resolve hook settings (CLI > config file > env) ─────────────────────
+    hook_url = args.hook_url or cfg.get("GERRIT_HOOK_URL") or os.environ.get("GERRIT_HOOK_URL", "")
+    hook_token = args.hook_token or cfg.get("GERRIT_HOOK_TOKEN") or os.environ.get("GERRIT_HOOK_TOKEN", "")
 
     # ── Resolve outbox path ──────────────────────────────────────────────────
     outbox_path: str | None = (
         args.outbox
+        or cfg.get("GERRIT_OUTBOX_PATH")
         or os.environ.get("GERRIT_OUTBOX_PATH", "")
         or (str(Path.cwd() / "events.outbox.jsonl") if hook_url else None)
     ) or None
@@ -695,7 +741,7 @@ def stream_events(args: argparse.Namespace) -> int:
                     log.warning("SSH process exited with code %d.", proc.returncode)
                     if stderr_output:
                         log.debug("SSH stderr: %s", stderr_output)
-                    _log_ssh_error(stderr_output, cfg)
+                    _log_ssh_error(stderr_output, ssh_cfg)
                     if not args.reconnect:
                         exit_code = proc.returncode or 1
                         break
@@ -710,7 +756,7 @@ def stream_events(args: argparse.Namespace) -> int:
                     log.error("'ssh' is not installed or not in PATH. Install OpenSSH.")
                 else:
                     log.debug("Verify: ssh_host=%r, ssh_port=%s, ssh_username=%r",
-                              cfg.get("ssh_host"), cfg.get("ssh_port"), cfg.get("ssh_username"))
+                              ssh_cfg.get("ssh_host"), ssh_cfg.get("ssh_port"), ssh_cfg.get("ssh_username"))
                 if not args.reconnect:
                     exit_code = 1
                     break
@@ -756,7 +802,9 @@ def main() -> None:
         epilog=__doc__,
         add_help=False,
     )
-    # ── SSH connection (override env vars) ────────────────────────────────────
+    # ── SSH connection (override config/env vars) ─────────────────────────────
+    parser.add_argument("--workspace", default=None,
+                        help="Workspace directory for config file lookup")
     parser.add_argument("--host", metavar="HOST", default="",
                         help="SSH hostname (overrides GERRIT_SSH_HOST / derived from GERRIT_URL)")
     parser.add_argument("--port", metavar="PORT", type=int, default=0,

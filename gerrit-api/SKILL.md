@@ -52,10 +52,28 @@ python3 --version   # must be ≥ 3.9
 ssh -V              # must be installed (for stream-events only)
 ```
 
-### Step 2 — Set Environment Variables
+### Step 2 — Configure Credentials
+
+Choose **one** of the two options below. Config file takes priority over env vars.
+
+**Option A — Config file (recommended for persistent setups)**
+
+Create `{workspace}/.config/gerrit-api.json` (or `~/.config/gerrit-api.json`):
+
+```json
+{
+  "GERRIT_URL": "https://gerrit.example.com",
+  "GERRIT_USERNAME": "john.doe",
+  "GERRIT_HTTP_PASSWORD": "your-http-credential-token",
+  "GERRIT_SSH_PORT": "29418",
+  "GERRIT_SSH_KEY": "~/.ssh/id_rsa"
+}
+```
+
+**Option B — Environment variables**
 
 ```bash
-# Required (set once per session or in the shell profile)
+# Required
 export GERRIT_URL="https://gerrit.example.com"
 export GERRIT_USERNAME="john.doe"
 export GERRIT_HTTP_PASSWORD="your-http-credential-token"
@@ -67,22 +85,15 @@ export GERRIT_SSH_USERNAME="john.doe"          # default: GERRIT_USERNAME
 export GERRIT_SSH_KEY="~/.ssh/id_rsa"          # default: ~/.ssh/id_rsa
 ```
 
-> ⚠️ **HTTP Password** ≠ Gerrit login password. Generate at: Gerrit → Settings → HTTP Credentials → Generate Password
-> ⚠️ **SSH Key** must be uploaded: Gerrit → Settings → SSH Keys → Add Key
-
-Windows CMD:
+Windows CMD / PowerShell:
 ```cmd
 set GERRIT_URL=https://gerrit.example.com
 set GERRIT_USERNAME=john.doe
 set GERRIT_HTTP_PASSWORD=your-http-credential-token
 ```
 
-Windows PowerShell:
-```powershell
-$env:GERRIT_URL = "https://gerrit.example.com"
-$env:GERRIT_USERNAME = "john.doe"
-$env:GERRIT_HTTP_PASSWORD = "your-http-credential-token"
-```
+> ⚠️ **HTTP Password** ≠ Gerrit login password. Generate at: Gerrit → Settings → HTTP Credentials → Generate Password  
+> ⚠️ **SSH Key** must be uploaded: Gerrit → Settings → SSH Keys → Add Key
 
 ### Step 3 — Test the Connection
 

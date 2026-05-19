@@ -9,6 +9,8 @@ Exit codes:
   1 = fatal error (KNOWLEDGE_BASE_DIR not set, not absolute, not writable)
 """
 
+import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -77,69 +79,97 @@ TEMP_README = """\
 """
 
 
+def _load_file_config(workspace: str | None = None) -> dict:
+    """Load .config/claw-knowledge-base.json from workspace or home."""
+    candidates = []
+    if workspace:
+        candidates.append(Path(workspace) / ".config" / "claw-knowledge-base.json")
+    candidates.append(Path.cwd() / ".config" / "claw-knowledge-base.json")
+    candidates.append(Path.home() / ".config" / "claw-knowledge-base.json")
+    seen, search = set(), []
+    for p in candidates:
+        k = str(p)
+        if k not in seen:
+            seen.add(k)
+            search.append(p)
+    for path in search:
+        if path.is_file():
+            try:
+                d = json.loads(path.read_text(encoding="utf-8"))
+                return d if isinstance(d, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {}
+
+
 def fatal(msg: str):
     print(f"❌ {msg}")
     sys.exit(1)
 
 
-# ── Validate KNOWLEDGE_BASE_DIR ────────────────────────────────────────────────
-kb_raw = os.environ.get("KNOWLEDGE_BASE_DIR", "")
-if not kb_raw:
-    fatal("KNOWLEDGE_BASE_DIR 未设置。\n"
-          "   请先设置: export KNOWLEDGE_BASE_DIR=\"/abs/path/to/knowledge-base\"\n"
-          "   或在 openclaw.json 的 env 字段中配置。")
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", help="Workspace path for config lookup")
+    args = parser.parse_args()
 
-if not os.path.isabs(kb_raw):
-    fatal(f"KNOWLEDGE_BASE_DIR 必须为绝对路径，当前值: {kb_raw!r}")
+    cfg = _load_file_config(args.workspace)
+    kb_raw = (cfg.get("KNOWLEDGE_BASE_DIR") or os.environ.get("KNOWLEDGE_BASE_DIR", "")).strip()
+    if not kb_raw:
+        fatal("KNOWLEDGE_BASE_DIR 未设置。\n"
+              "   Option 1: 在 .config/claw-knowledge-base.json 中添加 {\"KNOWLEDGE_BASE_DIR\": \"/abs/path\"}\n"
+              "   Option 2: 在 openclaw.json 的 env 字段中添加: \"KNOWLEDGE_BASE_DIR\": \"/abs/path/to/knowledge-base\"")
 
-kb = Path(kb_raw)
+    if not os.path.isabs(kb_raw):
+        fatal(f"KNOWLEDGE_BASE_DIR 必须为绝对路径，当前值: {kb_raw!r}")
 
-# ── Create root directory if needed ───────────────────────────────────────────
-if not kb.exists():
-    try:
-        kb.mkdir(parents=True, exist_ok=True)
-        print(f"✅ 创建根目录: {kb}")
-    except OSError as e:
-        fatal(f"无法创建目录 {kb}: {e}")
-elif not kb.is_dir():
-    fatal(f"{kb} 已存在但不是目录")
+    kb = Path(kb_raw)
 
-if not os.access(kb, os.W_OK):
-    fatal(f"目录 {kb} 不可写。请检查权限。")
+    if not kb.exists():
+        try:
+            kb.mkdir(parents=True, exist_ok=True)
+            print(f"✅ 创建根目录: {kb}")
+        except OSError as e:
+            fatal(f"无法创建目录 {kb}: {e}")
+    elif not kb.is_dir():
+        fatal(f"{kb} 已存在但不是目录")
 
-# ── Create subdirectories ──────────────────────────────────────────────────────
-created = []
-skipped = []
+    if not os.access(kb, os.W_OK):
+        fatal(f"目录 {kb} 不可写。请检查权限。")
 
-for dirname, desc in DIRS_WITH_DESC.items():
-    subdir = kb / dirname
-    if not subdir.exists():
-        subdir.mkdir()
-        created.append(dirname)
-        print(f"✅ 创建子目录: {dirname}/")
-    else:
-        skipped.append(dirname)
-        print(f"   已存在（跳过）: {dirname}/")
+    created = []
+    skipped = []
 
-    # Write README.md if not present
-    readme = subdir / "README.md"
-    if not readme.exists():
-        if dirname == "temp":
-            content = TEMP_README
-        elif dirname == "code-review":
-            content = CODE_REVIEW_README
+    for dirname, desc in DIRS_WITH_DESC.items():
+        subdir = kb / dirname
+        if not subdir.exists():
+            subdir.mkdir()
+            created.append(dirname)
+            print(f"✅ 创建子目录: {dirname}/")
         else:
-            title = dirname.replace("-", " ").title()
-            content = README_TEMPLATE.format(title=title, desc=desc)
-        readme.write_text(content, encoding="utf-8")
-        print(f"   ✅ 写入 {dirname}/README.md")
+            skipped.append(dirname)
+            print(f"   已存在（跳过）: {dirname}/")
 
-# ── Summary ───────────────────────────────────────────────────────────────────
-print()
-if created:
-    print(f"✅ 新创建 {len(created)} 个子目录: {', '.join(created)}")
-if skipped:
-    print(f"   已存在（未修改）: {len(skipped)} 个: {', '.join(skipped)}")
-print(f"\n知识库根目录: {kb}")
-print("初始化完成。下一步请确认 openclaw.json 已配置 memorySearch.extraPaths（见 SKILL.md Step 3）。")
-sys.exit(0)
+        readme = subdir / "README.md"
+        if not readme.exists():
+            if dirname == "temp":
+                content = TEMP_README
+            elif dirname == "code-review":
+                content = CODE_REVIEW_README
+            else:
+                title = dirname.replace("-", " ").title()
+                content = README_TEMPLATE.format(title=title, desc=desc)
+            readme.write_text(content, encoding="utf-8")
+            print(f"   ✅ 写入 {dirname}/README.md")
+
+    print()
+    if created:
+        print(f"✅ 新创建 {len(created)} 个子目录: {', '.join(created)}")
+    if skipped:
+        print(f"   已存在（未修改）: {len(skipped)} 个: {', '.join(skipped)}")
+    print(f"\n知识库根目录: {kb}")
+    print("初始化完成。下一步请确认 openclaw.json 已配置 memorySearch.extraPaths（见 SKILL.md Step 3）。")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

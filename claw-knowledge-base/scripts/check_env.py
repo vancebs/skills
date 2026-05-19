@@ -32,6 +32,29 @@ WARN = "⚠️ "
 errors = []
 
 
+def _load_file_config(workspace: str | None = None) -> dict:
+    """Load .config/claw-knowledge-base.json from workspace or home."""
+    candidates = []
+    if workspace:
+        candidates.append(Path(workspace) / ".config" / "claw-knowledge-base.json")
+    candidates.append(Path.cwd() / ".config" / "claw-knowledge-base.json")
+    candidates.append(Path.home() / ".config" / "claw-knowledge-base.json")
+    seen, search = set(), []
+    for p in candidates:
+        k = str(p)
+        if k not in seen:
+            seen.add(k)
+            search.append(p)
+    for path in search:
+        if path.is_file():
+            try:
+                d = json.loads(path.read_text(encoding="utf-8"))
+                return d if isinstance(d, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {}
+
+
 def check(ok: bool, label: str, detail: str = "", fix: str = "") -> bool:
     icon = PASS if ok else FAIL
     line = f"{icon} {label}"
@@ -52,11 +75,15 @@ if not is_openclaw:
     print("   本 skill 仅支持 OpenClaw 平台。若您在 OpenClaw 中运行，可忽略此提示。")
 
 # ── 2. KNOWLEDGE_BASE_DIR set ──────────────────────────────────────────────────
-kb_raw = os.environ.get("KNOWLEDGE_BASE_DIR", "")
+cfg = _load_file_config()
+kb_raw = (cfg.get("KNOWLEDGE_BASE_DIR") or os.environ.get("KNOWLEDGE_BASE_DIR", "")).strip()
+if cfg:
+    print(f"{WARN} 配置来源: 配置文件")
 if not kb_raw:
     check(False, "KNOWLEDGE_BASE_DIR",
           "未设置",
-          "在 openclaw.json 的 env 字段中添加: \"KNOWLEDGE_BASE_DIR\": \"/abs/path/to/knowledge-base\"")
+          "Option 1: 在 .config/claw-knowledge-base.json 中添加 {\"KNOWLEDGE_BASE_DIR\": \"/abs/path\"}\n"
+          "   Option 2: 在 openclaw.json 的 env 字段中添加: \"KNOWLEDGE_BASE_DIR\": \"/abs/path/to/knowledge-base\"")
     print("\n❌ 关键检查失败，无法继续后续检查。")
     sys.exit(1)
 

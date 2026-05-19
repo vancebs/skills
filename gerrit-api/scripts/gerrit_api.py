@@ -6,14 +6,14 @@ Pure-Python implementation that works on Windows, Linux, and macOS without
 any extra dependencies (uses only the Python standard library: urllib, json,
 base64, pathlib).
 
-Credentials are read exclusively from environment variables:
+Credentials are read from an optional JSON config file or environment variables:
   GERRIT_URL              Gerrit base URL (required), e.g. https://gerrit.example.com
   GERRIT_USERNAME         Gerrit username (required)
   GERRIT_HTTP_PASSWORD    HTTP credential token (required)
                           Generate at: Gerrit → Settings → HTTP Credentials
 
 Usage:
-  python gerrit_api.py <command> [args...]
+  python gerrit_api.py [--workspace PATH] <command> [args...]
 
 Commands:
   query         <query-string> [OPTION ...]   Query for changes
@@ -31,6 +31,7 @@ Commands:
   help                                         Show this help
 """
 
+import argparse
 import base64
 import json
 import os
@@ -63,18 +64,72 @@ def _is_ssl_error(exc: Exception) -> bool:
 
 # ─── Config loading ───────────────────────────────────────────────────────────
 
-def load_config() -> tuple[str, str, str]:
-    """Return (url, username, password) from environment variables."""
-    url      = os.environ.get("GERRIT_URL", "").strip().rstrip("/")
-    username = os.environ.get("GERRIT_USERNAME", "").strip()
-    password = os.environ.get("GERRIT_HTTP_PASSWORD", "").strip()
+def _load_file_config(workspace: str | None = None) -> dict:
+    """Load config from {workspace}/.config/gerrit-api.json or ~/.config/gerrit-api.json.
+
+    Returns a dict of {ENV_VAR_NAME: value} or empty dict if no config file found.
+    Config file format:
+      {
+        "GERRIT_URL": "https://gerrit.example.com",
+        "GERRIT_USERNAME": "john.doe",
+        "GERRIT_HTTP_PASSWORD": "secret"
+      }
+    """
+    import pathlib
+    candidates = []
+    if workspace:
+        candidates.append(pathlib.Path(workspace) / ".config" / "gerrit-api.json")
+    candidates.append(pathlib.Path.cwd() / ".config" / "gerrit-api.json")
+    candidates.append(pathlib.Path.home() / ".config" / "gerrit-api.json")
+
+    # Deduplicate while preserving order
+    seen = set()
+    search = []
+    for p in candidates:
+        rp = str(p.resolve()) if p.exists() else str(p)
+        if rp not in seen:
+            seen.add(rp)
+            search.append(p)
+
+    for path in search:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass  # Silently skip invalid/unreadable files
+    return {}
+
+
+def load_config(workspace: str | None = None) -> tuple[str, str, str]:
+    """Return (url, username, password) from config file (preferred) or env vars."""
+    cfg = _load_file_config(workspace)
+
+    url      = (cfg.get("GERRIT_URL") or os.environ.get("GERRIT_URL", "")).strip().rstrip("/")
+    username = (cfg.get("GERRIT_USERNAME") or os.environ.get("GERRIT_USERNAME", "")).strip()
+    password = (cfg.get("GERRIT_HTTP_PASSWORD") or os.environ.get("GERRIT_HTTP_PASSWORD", "")).strip()
 
     if not url:
-        _die("GERRIT_URL is not set.\n  → export GERRIT_URL=\"https://gerrit.example.com\"")
+        _die(
+            "GERRIT_URL is not set.\n"
+            "  Option 1 (config file): create {workspace}/.config/gerrit-api.json\n"
+            '    {"GERRIT_URL": "https://gerrit.example.com", "GERRIT_USERNAME": "...", "GERRIT_HTTP_PASSWORD": "..."}\n'
+            '  Option 2 (env var): export GERRIT_URL="https://gerrit.example.com"'
+        )
     if not username:
-        _die("GERRIT_USERNAME is not set.\n  → export GERRIT_USERNAME=\"john.doe\"")
+        _die(
+            "GERRIT_USERNAME is not set.\n"
+            "  Option 1 (config file): add GERRIT_USERNAME to {workspace}/.config/gerrit-api.json\n"
+            '  Option 2 (env var): export GERRIT_USERNAME="john.doe"'
+        )
     if not password:
-        _die("GERRIT_HTTP_PASSWORD is not set.\n  → export GERRIT_HTTP_PASSWORD=\"your-http-token\"\n  (Generate at: Gerrit → Settings → HTTP Credentials)")
+        _die(
+            "GERRIT_HTTP_PASSWORD is not set.\n"
+            "  Option 1 (config file): add GERRIT_HTTP_PASSWORD to {workspace}/.config/gerrit-api.json\n"
+            '  Option 2 (env var): export GERRIT_HTTP_PASSWORD="your-http-token"\n'
+            "  (Generate at: Gerrit → Settings → HTTP Credentials)"
+        )
 
     return url, username, password
 
@@ -351,12 +406,16 @@ _COMMANDS = {
 
 
 def main() -> None:
-    if len(sys.argv) < 2 or sys.argv[1] in ("help", "--help", "-h"):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--workspace", default=None, help="Workspace directory for config file lookup")
+    parser.add_argument("command", nargs="?")
+    args, command_args = parser.parse_known_args()
+
+    if not args.command or args.command in ("help", "--help", "-h"):
         cmd_help()
         return
 
-    command = sys.argv[1]
-    args = sys.argv[2:]
+    command = args.command
 
     if command not in _COMMANDS:
         _die(f"Unknown command '{command}'. Run 'python gerrit_api.py help' for usage.")
@@ -365,8 +424,8 @@ def main() -> None:
         cmd_help()
         return
 
-    base_url, username, password = load_config()
-    _COMMANDS[command](base_url, username, password, args)
+    url, username, password = load_config(workspace=args.workspace)
+    _COMMANDS[command](url, username, password, command_args)
 
 
 if __name__ == "__main__":

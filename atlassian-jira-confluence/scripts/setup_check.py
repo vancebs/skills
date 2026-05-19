@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 setup_check.py - Verify environment and SDK installation for atlassian-jira-confluence skill.
-Usage: python3 scripts/setup_check.py
+Usage: python3 scripts/setup_check.py [--workspace WORKSPACE]
 
 Checks:
   1. atlassian-python-api SDK installed
@@ -13,14 +13,41 @@ Exit codes:
   0 — all checks passed
   1 — one or more checks failed
 """
+import argparse
+import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 _OK   = "✅"
 _FAIL = "❌"
 _INFO = "ℹ️ "
+
+
+def _load_file_config(skill_name: str, workspace: str | None = None) -> dict:
+    """Load JSON config from workspace or home .config directory."""
+    candidates = []
+    if workspace:
+        candidates.append(Path(workspace) / ".config" / f"{skill_name}.json")
+    candidates.append(Path.cwd() / ".config" / f"{skill_name}.json")
+    candidates.append(Path.home() / ".config" / f"{skill_name}.json")
+    seen, search = set(), []
+    for p in candidates:
+        k = str(p)
+        if k not in seen:
+            seen.add(k)
+            search.append(p)
+    for path in search:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {}
 
 
 def check_sdk():
@@ -35,11 +62,11 @@ def check_sdk():
         return False
 
 
-def _check_service(name: str, url_var: str, token_var: str, user_var: str) -> dict | None:
+def _check_service(name: str, url_var: str, token_var: str, user_var: str, cfg: dict) -> dict | None:
     """Check env vars for one Atlassian service. Returns creds dict or None."""
-    url   = os.environ.get(url_var, "").strip().rstrip("/")
-    token = os.environ.get(token_var, "").strip()
-    user  = os.environ.get(user_var, "").strip()
+    url   = (cfg.get(url_var) or os.environ.get(url_var, "")).strip().rstrip("/")
+    token = (cfg.get(token_var) or os.environ.get(token_var, "")).strip()
+    user  = (cfg.get(user_var) or os.environ.get(user_var, "")).strip()
 
     ok = True
     if url:
@@ -62,12 +89,12 @@ def _check_service(name: str, url_var: str, token_var: str, user_var: str) -> di
     return {"url": url, "token": token, "username": user} if ok else None
 
 
-def check_credentials():
+def check_credentials(cfg: dict):
     print(f"\n─── Jira ────────────────────────────────────────")
-    jira_creds = _check_service("Jira", "JIRA_URL", "JIRA_PAT_TOKEN", "JIRA_USERNAME")
+    jira_creds = _check_service("Jira", "JIRA_URL", "JIRA_PAT_TOKEN", "JIRA_USERNAME", cfg)
 
     print(f"\n─── Confluence ──────────────────────────────────")
-    conf_creds = _check_service("Confluence", "CONFLUENCE_URL", "CONFLUENCE_PAT_TOKEN", "CONFLUENCE_USERNAME")
+    conf_creds = _check_service("Confluence", "CONFLUENCE_URL", "CONFLUENCE_PAT_TOKEN", "CONFLUENCE_USERNAME", cfg)
 
     return jira_creds, conf_creds
 
@@ -100,13 +127,23 @@ def test_confluence_connection(creds: dict):
         print(f"{_FAIL} Confluence 连接失败: {e}")
 
 
-if __name__ == "__main__":
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", help="Workspace path for config lookup")
+    args = parser.parse_args()
+
     print("=" * 52)
     print("  atlassian-jira-confluence 环境检查")
     print("=" * 52)
 
+    cfg = _load_file_config("atlassian-jira-confluence", args.workspace)
+    if cfg:
+        print(f"{_INFO} 配置来源: 配置文件")
+    else:
+        print(f"{_INFO} 配置来源: 环境变量")
+
     sdk_ok = check_sdk()
-    jira_creds, conf_creds = check_credentials()
+    jira_creds, conf_creds = check_credentials(cfg)
 
     if sdk_ok:
         print(f"\n─── 连接测试 ────────────────────────────────────")
@@ -122,7 +159,11 @@ if __name__ == "__main__":
     print("\n" + "=" * 52)
     if sdk_ok and jira_creds and conf_creds:
         print(f"{_OK} 所有检查通过！")
-        sys.exit(0)
-    else:
-        print(f"{_FAIL} 存在未通过项，按上方提示逐一解决后重新运行。")
-        sys.exit(1)
+        return 0
+
+    print(f"{_FAIL} 存在未通过项，按上方提示逐一解决后重新运行。")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
