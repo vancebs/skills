@@ -141,115 +141,81 @@ python .agents\skills\gerrit-api\scripts\gerrit_api.py get-diff <change_number> 
 
 #### 3D — 生成报告（固定格式）
 
-> ⚠️ **严格按以下格式输出报告，不得附加任何格式外的文字、解释、前言或后记。**
+> ⚠️ **严格按以下格式输出报告，不允许附加任何格式外的内容。**
 
 ```
-============================
-Code Review 报告
-============================
-变更：#{change_number} — {subject}
-项目：{project}  分支：{branch}
-提交人：{uploader}
-审查结果：【PASS】 或 【FAIL】
-============================
+**PASS** 或 **FAIL**
 
-## 提交信息审查
-
-[{级别}] {CM编号} {问题描述}
-→ 原因：{违反的规范条目，如 "T2MCodingRule 1.3: Solution 字段描述不具体"}
-→ 建议：{具体修改建议}
-
-（无问题时写 "✅ 符合规范"）
-
-## 文件审查
-
-### {file_path}
-[{级别}] 行 {line}: {问题描述}
-→ 原因：{违反的规范条目}
-→ 建议：{具体修改建议}
-
-（无问题时写 "✅ 无问题"）
-
-============================
-汇总：🔴 {n}  🟠 {n}  🟡 {n}  🔵 {n}
-============================
-```
-
-**级别标记说明：**
-
-| 写法 | 含义 |
-|---|---|
-| `[🔴 CRITICAL]` | 安全漏洞、编译错误 |
-| `[🟠 ERROR]` | 违反强制规则 |
-| `[🟡 WARNING]` | 建议改进 |
-| `[🔵 INFO]` | 可选建议 |
-
-**报告输出规则（严格执行）：**
-- 报告以第一行 `============================` 开始，以最后一行 `============================` 结束
-- 报告正文以外**不得输出任何其他内容**（无引言、无总结段落、无 markdown 代码块包裹）
-- `## 提交信息审查` 和 `## 文件审查` 两节均必须存在，不得省略
-- 每个问题项必须包含 `→ 原因` 和 `→ 建议` 两行
-
----
-
-### 阶段四 — 发布结果
-
-读取 `CODE_REVIEW_TEST_MODE` 环境变量（默认 `true`）：
-
-#### 4A — CODE_REVIEW_TEST_MODE = true（默认）
-
-直接将报告打印到当前会话，**不操作 Gerrit**。
-
-#### 4B — CODE_REVIEW_TEST_MODE = false
-
-用 gerrit-api 发布 review comment 并设置 Verified 标签：
-
-```bash
-# PASS：Verified=0，发布 comment
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
-  review <change_number> current \
-  '{"message": "<报告文本>", "labels": {"Verified": 0}, "tag": "code-review-agent"}'
-
-# FAIL：Verified=-1，发布 comment
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
-  review <change_number> current \
-  '{"message": "<报告文本>", "labels": {"Verified": -1}, "tag": "code-review-agent"}'
-```
-
-**报告文本较长时（推荐），先写文件再传入：**
-
-```bash
-# 将报告写入临时文件
-python3 -c "
-import sys, json
-report = '''
-{报告文本}
-'''.strip()
-print(json.dumps({'message': report, 'labels': {'Verified': 0}, 'tag': 'code-review-agent'}))
-" > review_body.json
-
-python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
-  review <change_number> current "$(cat review_body.json)"
-```
-
-```powershell
-# Windows PowerShell
-$body = @{
-    message = @"
-{报告文本}
-"@
-    labels  = @{ Verified = 0 }
-    tag     = "code-review-agent"
-} | ConvertTo-Json -Compress
-
-python .agents\skills\gerrit-api\scripts\gerrit_api.py review <change_number> current $body
-```
-
-**gerrit-api review 命令退出码：**
-
-| 退出码 | 含义 | 后续动作 |
+| 级别 | 文件 | 问题 |
 |---|---|---|
-| `0` | 成功提交到 Gerrit | 完成 |
-| 非 0 | 提交失败（详见 stderr）| 检查权限或网络 |
+| 🔴 CRITICAL | {file}:{line} | [{编号}] {一句话描述，≤30字} |
+| 🟠 ERROR | commit-message:1 | [CM-1] 首行必须匹配`^\S+\s+\S+.*` |
+| 🟡 WARNING | {file}:{line} | [{编号}] {描述} |
+| 🔵 INFO | {file}:{line} | {描述} |
 
----
+# Patch信息
+URL: {gerrit_url}/c/{project}/+/{change_number}
+Change-Id: {change_id}
+Owner: {owner_email}
+Repo: {project}
+Branch: {branch}
+
+# 问题清单
+## {file_path}:{line}
+[{级别}] [{编号}]{问题描述}
+- **原因:** {违反的规范条目及理由}
+- **建议:** {具体修改建议}
+```
+
+**格式规则（严格执行）：**
+- 第一行必须是 `**PASS**` 或 `**FAIL**`
+- 无问题时，问题列表表格省略
+- `# Patch信息` 必须包含 URL、Change-Id、Owner、Repo、Branch 五个字段
+- `# 问题清单` 每个问题以 `## {文件}:{行号}` 为标题（commit message 使用 `## commit-message:1`）
+- 每个问题必须有 `- **原因:**` 和 `- **建议:**` 两行
+- 问题描述不超过 30 字；规范编号（CM-1 等）在描述头部标出
+
+**示例（FAIL）：**
+
+```
+**FAIL**
+
+| 级别 | 文件 | 问题 |
+|---|---|---|
+| 🟠 ERROR | commit-message:1 | [CM-1] 首行格式不符合 `<Issue Key> <Summary>` |
+| 🔴 CRITICAL | generic/vendor/common/init.te:13 | 允许写 /proc/sysrq-trigger |
+
+# Patch信息
+URL: https://gerrit.t2mobile.com/c/quicl/vendor/fairphone/source/apps/+/129616
+Change-Id: Ibc9288f7fbe0bb3295693f417ff6b70aac240de4
+Owner: tianwen.zhang@t2mobile.com
+Repo: quicl/vendor/fairphone/source/apps
+Branch: 635_17x_qssi_dev
+
+# 问题清单
+## commit-message:1
+[🟠 ERROR] [CM-1]首行格式不符合：`<Issue Key> <Summary>`
+- **原因:** 首行必须匹配 `^\S+\s+\S+.*`，即 Issue Key + 空格 + Summary
+- **建议:** 修改为 `[FP6A17-138] add tcpdump function[2/3]`
+
+## generic/vendor/common/init.te:13
+[🔴 CRITICAL] 允许写 /proc/sysrq-trigger（proc_sysrq:file write）
+- **原因:** 新增 `allow vendor_init proc_sysrq:file w_file_perms;` 允许写入 /proc/sysrq-trigger，可能触发系统级 sysrq 操作被滥用。
+- **建议:** 仅在明确受信流程中允许；限制可触发的命令集合、在实现层加入白名单并记录审计日志。
+```
+
+**示例（PASS）：**
+
+```
+**PASS**
+
+# Patch信息
+URL: https://gerrit.example.com/c/myproject/+/12345
+Change-Id: Iabcdef1234567890abcdef1234567890abcdef12
+Owner: john.doe@example.com
+Repo: myproject
+Branch: main
+
+# 问题清单
+（无问题）
+```

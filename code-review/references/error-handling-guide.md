@@ -120,40 +120,6 @@ python3 .agents/skills/gerrit-api/scripts/gerrit_api.py \
 
 ---
 
-## 阶段四：发布结果错误
-
-### `review` 命令失败
-
-| HTTP 状态码 / 错误 | 原因 | 处理 |
-|---|---|---|
-| 401 | HTTP 凭据失效 | 重新生成 HTTP Password；更新 `GERRIT_HTTP_PASSWORD` |
-| 403 | 账号无 Verified 投票权限 | 联系 Gerrit 管理员，将账号添加到 Verified 权限组 |
-| 409 Conflict | change 已 Merged 或 Abandoned | 不设 Verified 标签；可发 comment（去掉 labels 字段） |
-| 5xx / 网络超时 | Gerrit 服务端故障 | 最多重试 2 次（间隔 10s）；超限后停止，**不标记 Verified** |
-
-**重试逻辑：**
-```python
-import time, subprocess
-
-for attempt in range(3):
-    result = subprocess.run([...review command...], capture_output=True)
-    if result.returncode == 0:
-        break
-    if attempt < 2:
-        time.sleep(10)
-else:
-    print("❌ review 发布失败（已重试 2 次），请手动检查 Gerrit")
-```
-
----
-
-### change 在 get-change 和 review 之间新增了 patchset
-
-**场景：** 评审过程中开发者推送了新的 patchset。
-
-**影响：** 使用 `current` 关键字时，`review` 命令自动指向最新 patchset — 这是期望行为，无需特殊处理。
-
----
 
 ## 依赖检查失败
 

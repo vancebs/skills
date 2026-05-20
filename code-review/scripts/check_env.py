@@ -6,8 +6,7 @@ Checks:
   1. Python >= 3.9
   2. gerrit-api skill is installed (.agents/skills/gerrit-api/)
   3. GERRIT_URL, GERRIT_USERNAME, GERRIT_HTTP_PASSWORD env vars are set
-  4. CODE_REVIEW_TEST_MODE env var (warn if not set, default true)
-  5. T2MCodingRule skill is installed (.agents/skills/T2MCodingRule/)
+  4. T2MCodingRule skill is installed (.agents/skills/T2MCodingRule/)
 
 Usage:
     python3 scripts/check_env.py [--workspace WORKSPACE]
@@ -102,15 +101,7 @@ def check_gerrit_env_vars(cfg: dict):
     return ok
 
 
-def check_code_review_mode(cfg: dict):
-    val = (cfg.get("CODE_REVIEW_TEST_MODE") or os.environ.get("CODE_REVIEW_TEST_MODE", "")).strip()
-    if not val:
-        print(f"{_WARN} CODE_REVIEW_TEST_MODE 未设置（默认 true = 仅打印报告，不写 Gerrit）")
-        print(f"       如需发布到 Gerrit: export CODE_REVIEW_TEST_MODE=false")
-    else:
-        mode_desc = "（仅打印报告，不写 Gerrit）" if val.lower() == "true" else "（将发布到 Gerrit）"
-        print(f"{_OK} CODE_REVIEW_TEST_MODE = {val}  {mode_desc}")
-
+def check_code_review_config(cfg: dict):
     skip_patterns = (cfg.get("CODE_REVIEW_SKIP_PATTERNS") or os.environ.get("CODE_REVIEW_SKIP_PATTERNS", "")).strip()
     if skip_patterns:
         print(f"{_OK} CODE_REVIEW_SKIP_PATTERNS = {skip_patterns}")
@@ -150,7 +141,7 @@ def main():
     results["gerrit_env"] = check_gerrit_env_vars(cfg)
 
     print("\n─── code-review 配置 ─────────────────────────────────────")
-    check_code_review_mode(cfg)
+    check_code_review_config(cfg)
 
     print("\n" + "=" * 62)
     fails = [k for k, v in results.items() if not v]

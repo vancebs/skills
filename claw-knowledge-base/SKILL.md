@@ -38,14 +38,14 @@ triggers:
 
 ## ⚡ 操作速查
 
-| 操作 | 方法 | 示例 |
-|---|---|---|
-| 语义检索 | `memory_search "关键词"` | `memory_search "gerrit SSH"` |
-| 路径读取 | `cat $KNOWLEDGE_BASE_DIR/<path>` | `cat $KNOWLEDGE_BASE_DIR/temp/x.md` |
-| 路径引用 | `kb://<path>` | `kb://code-review/2024-01-15_12345.md` |
-| 写入文件 | Python `Path.write_text()` | 见工作流示例 |
-| 初始化目录 | `python3 scripts/init_dirs.py` | — |
-| 环境检查 | `python3 scripts/check_env.py` | — |
+| 操作    | 方法                               | 示例                                     |
+| ----- | -------------------------------- | -------------------------------------- |
+| 语义检索  | `memory_search "关键词"`            | `memory_search "gerrit SSH"`           |
+| 路径读取  | `cat $KNOWLEDGE_BASE_DIR/<path>` | `cat $KNOWLEDGE_BASE_DIR/temp/x.md`    |
+| 路径引用  | `kb://<path>`                    | `kb://code-review/2024-01-15_12345.md` |
+| 写入文件  | Python `Path.write_text()`       | 见工作流示例                                 |
+| 初始化目录 | `python3 scripts/init_dirs.py`   | —                                      |
+| 环境检查  | `python3 scripts/check_env.py`   | —                                      |
 
 ## 🚀 Quick Start
 
