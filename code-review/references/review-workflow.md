@@ -110,8 +110,6 @@ python .agents\skills\gerrit-api\scripts\gerrit_api.py get-diff <change_number> 
 
 > **注意：** `get-change` 返回的 `subject` 字段仅为首行。如需检查完整 commit message，可在报告中注明"无法获取完整 message"并仅基于 subject 审查 CM-1 ~ CM-3。
 
-> **例外处理（Commit Message）：** 实际开发中 commit message 不总能完整符合 T2MCodingRule。对 commit message 违规采取**降级处理**：🟠 ERROR 降为 🟡 WARNING，仅当首行完全缺失 Issue Key 时保持 🟠 ERROR。代码 diff 审查的级别不受此例外影响。
-
 #### 3B — 文件 Diff 审查
 
 **只审查 diff 中新增/修改的行（`+` 开头的行）**，根据扩展名选择规范：
