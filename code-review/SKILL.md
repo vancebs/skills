@@ -2,11 +2,9 @@
 name: code-review
 description: >
   This skill should be used when the agent receives a Gerrit change URL,
-  change-id (format: I[0-9a-f]{40}), commit SHA ([0-9a-f]{7,40}),
-  change number (integer), or Gerrit stream event JSON and needs to perform
-  code review. Fetches patch via gerrit-api skill, reviews per T2MCodingRule,
-  generates a structured report. Triggered on demand only — no cron or event listener.
-  Never modifies Gerrit.
+  change number, Change-Id (I[0-9a-f]{40}), commit SHA, or stream event JSON
+  and needs to perform code review. Fetches patch via gerrit-api, reviews per
+  T2MCodingRule, outputs a structured report. Read-only — never writes to Gerrit.
 dependencies:
   - skill: gerrit-api
   - skill: T2MCodingRule
@@ -269,8 +267,8 @@ python "%GERRIT_API_SKILL_DIR%\scripts\gerrit_api.py" get-diff <change_number> "
 |---|---|---|
 | 🔴 CRITICAL | {file}:{line} | [{编号}] {一句话描述，≤30字} |
 | 🟠 ERROR | commit-message:1 | [CM-1] 首行必须匹配`^\S+\s+\S+.*` |
-| 🟡 WARNING | {file}:{line} | [{编号}] {描述} |
-| 🔵 INFO | {file}:{line} | [{描述}] |
+| 🟡 WARNING | {file}:{line} | [{编号}] {描述，≤30字} |
+| 🔵 INFO | {file}:{line} | {描述，≤30字} |
 
 # Patch信息
 URL: {gerrit_url}/c/{project}/+/{change_number}
@@ -292,7 +290,8 @@ Branch: {branch}
 - `# Patch信息` 必须包含 URL、Change-Id、Owner、Repo、Branch 五个字段
 - `# 问题清单` 每个问题以 `## {文件}:{行号}` 为标题（commit message 使用 `## commit-message:1`）
 - 每个问题项必须包含 `- **原因:**` 和 `- **建议:**` 两行
-- 问题描述不超过 30 字；如有规范编号（CM-1 等），在描述头部标出
+- 问题列表（表格）每条问题描述不超过 30 字；如有规范编号（CM-1 等），在描述头部标出
+- 问题清单每条问题要求简洁，无字数限制
 
 **无问题时的输出示例（PASS）：**
 
@@ -380,7 +379,7 @@ Branch: main
 
 | 文件 | 内容 |
 |---|---|
-| [`references/review-workflow.md`](references/review-workflow.md) | 完整审查流程和报告格式模板 |
+| [`references/review-workflow.md`](references/review-workflow.md) | 完整审查流程和报告格式模板（含 FAIL/PASS 示例） |
 | [`references/error-handling-guide.md`](references/error-handling-guide.md) | 各阶段错误场景、诊断步骤和恢复措施 |
 
 ---
@@ -391,6 +390,23 @@ Branch: main
 code-review/
 ├── SKILL.md
 ├── README.md
+├── references/
+│   ├── review-workflow.md    ← 审查流程 + 报告格式模板
+│   └── error-handling-guide.md ← 错误处理指南
 └── scripts/
     └── check_env.py          ← 环境检查（验证 gerrit-api、T2MCodingRule 已安装，Gerrit 环境变量已设置）
 ```
+
+---
+
+## 快速排错
+
+| 症状 | 处理 |
+|---|---|
+| `check_env.py` 报 gerrit-api 未安装 | `npx skills add https://github.com/vancebs/skills --skill gerrit-api` |
+| `get-change` 返回 404 | change number 不存在，确认 Gerrit URL 和 change number |
+| `list-files` 返回空列表 | 纯文档/配置变更，报告输出 PASS + "无可审查代码文件" |
+| `get-diff` 对某文件返回空 | 二进制文件或新增空文件，跳过并在报告中标注 🔵 INFO |
+| Change-Id 或 SHA 查不到 | `query` 返回 0 条，提示用户确认 Gerrit 实例和 change 来源 |
+
+详细错误处理见 [`references/error-handling-guide.md`](references/error-handling-guide.md)。

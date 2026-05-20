@@ -150,8 +150,8 @@ python .agents\skills\gerrit-api\scripts\gerrit_api.py get-diff <change_number> 
 |---|---|---|
 | 🔴 CRITICAL | {file}:{line} | [{编号}] {一句话描述，≤30字} |
 | 🟠 ERROR | commit-message:1 | [CM-1] 首行必须匹配`^\S+\s+\S+.*` |
-| 🟡 WARNING | {file}:{line} | [{编号}] {描述} |
-| 🔵 INFO | {file}:{line} | {描述} |
+| 🟡 WARNING | {file}:{line} | [{编号}] {描述，≤30字} |
+| 🔵 INFO | {file}:{line} | {描述，≤30字} |
 
 # Patch信息
 URL: {gerrit_url}/c/{project}/+/{change_number}
