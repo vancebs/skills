@@ -115,6 +115,7 @@ flowchart TD
     G --> H[Step 5: 加载 T2MCodingRule，审查 diff]
     H --> I[Step 6: 生成并输出报告]
     I --> M([结束])
+    D --> M
 ```
 
 ---
