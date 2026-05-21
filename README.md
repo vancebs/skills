@@ -8,4 +8,3 @@
 
 | [code-review](code-review/) | 按需 Code Review。当 agent 收到 Gerrit 变更信息（页面 URL、change-id、commit SHA 或 stream event JSON）时，拉取 patch 并进行代码审查，生成报告并可发布到 Gerrit。无需事件监听或 cron job，专注单次审查任务。 | [📖 README](code-review/README.md) | `npx skills add https://github.com/vancebs/skills --skill code-review` |
 | [claw-knowledge-base](claw-knowledge-base/) | OpenClaw 平台多 Agent 共享知识库。管理 `KNOWLEDGE_BASE_DIR` 下分类 Markdown 文件，所有 `.md` 文件自动被 OpenClaw 索引，Agent 可通过 `memory_search` 语义检索，并按目录规范存入知识。仅支持 OpenClaw 平台。 | [📖 README](claw-knowledge-base/README.md) | `npx skills add https://github.com/vancebs/skills --skill claw-knowledge-base` |
-

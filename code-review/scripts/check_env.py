@@ -5,8 +5,8 @@ check_env.py — Environment checker for code-review skill.
 Checks:
   1. Python >= 3.9
   2. gerrit-api skill is installed (.agents/skills/gerrit-api/)
-  3. GERRIT_URL, GERRIT_USERNAME, GERRIT_HTTP_PASSWORD env vars are set
-  4. T2MCodingRule skill is installed (.agents/skills/T2MCodingRule/)
+     — delegates Gerrit credential check to gerrit-api/scripts/check_env.py
+  3. T2MCodingRule skill is installed (.agents/skills/T2MCodingRule/)
 
 Usage:
     python3 scripts/check_env.py [--workspace WORKSPACE]
@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -77,17 +78,29 @@ def _find_skill(name: str) -> Path | None:
     return None
 
 
-def check_gerrit_api_skill():
+def check_gerrit_api_skill(workspace: str | None) -> bool:
     p = _find_skill("gerrit-api")
-    if p:
-        print(f"{_OK} gerrit-api skill 已安装: {p}")
+    if not p:
+        print(f"{_FAIL} gerrit-api skill 未安装（必须安装，code-review 的所有 Gerrit 操作依赖它）")
+        print(f"      安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api")
+        return False
+    print(f"{_OK} gerrit-api skill 已安装: {p}")
+
+    # Delegate Gerrit credential check to gerrit-api's own check_env.py
+    check_script = p / "scripts" / "check_env.py"
+    if check_script.is_file():
+        print(f"\n─── Gerrit 凭据（由 gerrit-api/scripts/check_env.py 检查）──────")
+        cmd = [sys.executable, str(check_script)]
+        if workspace:
+            cmd += ["--workspace", workspace]
+        result = subprocess.run(cmd, text=True)
+        return result.returncode == 0
+    else:
+        print(f"{_WARN} gerrit-api/scripts/check_env.py 未找到，跳过凭据检查")
         return True
-    print(f"{_FAIL} gerrit-api skill 未安装（必须安装，code-review 的所有 Gerrit 操作依赖它）")
-    print(f"      安装命令: npx skills add https://github.com/vancebs/skills --skill gerrit-api")
-    return False
 
 
-def check_t2mcodingrule_skill():
+def check_t2mcodingrule_skill() -> bool:
     p = _find_skill("T2MCodingRule")
     if p:
         print(f"{_OK} T2MCodingRule skill 已安装: {p}")
@@ -97,21 +110,7 @@ def check_t2mcodingrule_skill():
     return False
 
 
-def check_gerrit_env_vars(cfg: dict):
-    ok = True
-    for var in ["GERRIT_URL", "GERRIT_USERNAME", "GERRIT_HTTP_PASSWORD"]:
-        val = (cfg.get(var) or os.environ.get(var, "")).strip()
-        source = "配置文件" if cfg.get(var) else "环境变量"
-        if val:
-            display = val if var in ("GERRIT_URL", "GERRIT_USERNAME") else val[:4] + "****"
-            print(f"{_OK} {var} = {display}  [{source}]")
-        else:
-            print(f"{_FAIL} {var} 未设置  →  在配置文件或环境变量中设置 {var}")
-            ok = False
-    return ok
-
-
-def check_code_review_config(cfg: dict):
+def check_code_review_config(cfg: dict) -> bool:
     skip_patterns = (cfg.get("CODE_REVIEW_SKIP_PATTERNS") or os.environ.get("CODE_REVIEW_SKIP_PATTERNS", "")).strip()
     if skip_patterns:
         print(f"{_OK} CODE_REVIEW_SKIP_PATTERNS = {skip_patterns}")
@@ -120,7 +119,7 @@ def check_code_review_config(cfg: dict):
     return True
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", help="Workspace path for config lookup")
     args = parser.parse_args()
@@ -144,11 +143,8 @@ def main():
     results["python"] = check_python()
 
     print("\n─── 依赖 skill ───────────────────────────────────────────")
-    results["gerrit_api"] = check_gerrit_api_skill()
+    results["gerrit_api"] = check_gerrit_api_skill(args.workspace)
     results["t2mcodingrule"] = check_t2mcodingrule_skill()
-
-    print("\n─── Gerrit 环境变量 ──────────────────────────────────────")
-    results["gerrit_env"] = check_gerrit_env_vars(cfg)
 
     print("\n─── code-review 配置 ─────────────────────────────────────")
     check_code_review_config(cfg)

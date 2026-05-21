@@ -65,6 +65,7 @@ Create `$WORKSPACE/.config/gerrit-api.json` (or `~/.config/gerrit-api.json`):
   "GERRIT_URL": "https://gerrit.example.com",
   "GERRIT_USERNAME": "john.doe",
   "GERRIT_HTTP_PASSWORD": "your-http-credential-token",
+  "GERRIT_DISABLE_SSL_VERIFY": "false",
   "GERRIT_SSH_PORT": "29418",
   "GERRIT_SSH_KEY": "~/.ssh/id_rsa"
 }
@@ -77,6 +78,9 @@ Create `$WORKSPACE/.config/gerrit-api.json` (or `~/.config/gerrit-api.json`):
 export GERRIT_URL="https://gerrit.example.com"
 export GERRIT_USERNAME="john.doe"
 export GERRIT_HTTP_PASSWORD="your-http-credential-token"
+
+# Optional — SSL
+export GERRIT_DISABLE_SSL_VERIFY="false"  # set to "true" to fix CERTIFICATE_VERIFY_FAILED
 
 # SSH stream-events (optional — defaults derived from GERRIT_URL)
 export GERRIT_SSH_HOST="gerrit.example.com"   # default: host from GERRIT_URL
@@ -95,13 +99,21 @@ set GERRIT_HTTP_PASSWORD=your-http-credential-token
 > ⚠️ **HTTP Password** ≠ Gerrit login password. Generate at: Gerrit → Settings → HTTP Credentials → Generate Password  
 > ⚠️ **SSH Key** must be uploaded: Gerrit → Settings → SSH Keys → Add Key
 
-### Step 3 — Test the Connection
+### Step 3 — Verify Environment
+
+```bash
+python3 scripts/check_env.py [--workspace /path/to/workspace]
+```
+
+Expected: all checks ✅. On error, follow the prompts in the output.
+
+### Step 4 — Test the Connection
 
 ```bash
 python3 scripts/gerrit_api.py query "status:open+limit:1"
 ```
 
-Expected: JSON output with change data. On error, see **Troubleshooting** below.
+Expected: JSON output with change data. On SSL error, set `GERRIT_DISABLE_SSL_VERIFY=true` in config or env.
 
 ### Step 4 — (Stream Events Only) Test SSH Connection
 

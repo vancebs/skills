@@ -1,16 +1,12 @@
 {
-  "url": "https://gerrit.example.com",
-  "username": "john.doe",
-  "password": "your-http-credential-token",
+  "GERRIT_URL": "https://gerrit.example.com",
+  "GERRIT_USERNAME": "john.doe",
+  "GERRIT_HTTP_PASSWORD": "your-http-credential-token",
 
-  "_comment_ssh": "SSH settings for stream-events. ssh_host defaults to the host in 'url'.",
-  "ssh_host": "gerrit.example.com",
-  "ssh_port": 29418,
-  "ssh_username": "john.doe",
-  "ssh_key": "~/.ssh/id_rsa",
+  "_comment_ssl": "Set to 'true' to disable SSL certificate verification (fixes CERTIFICATE_VERIFY_FAILED). Default: 'false'.",
+  "GERRIT_DISABLE_SSL_VERIFY": "false",
 
-  "_comment_hook": "Optional HTTP hook for real-time event delivery.",
-  "hook_url": "http://127.0.0.1:8443/events",
-  "hook_token": "your-hook-token",
-  "outbox_path": ""
+  "_comment_ssh": "SSH settings for stream-events. ssh_host defaults to the host in GERRIT_URL.",
+  "GERRIT_SSH_PORT": "29418",
+  "GERRIT_SSH_KEY": "~/.ssh/id_rsa"
 }

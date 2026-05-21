@@ -11,6 +11,9 @@ Credentials are read from an optional JSON config file or environment variables:
   GERRIT_USERNAME         Gerrit username (required)
   GERRIT_HTTP_PASSWORD    HTTP credential token (required)
                           Generate at: Gerrit → Settings → HTTP Credentials
+  GERRIT_DISABLE_SSL_VERIFY  Set to "true" to skip SSL certificate verification.
+                          Useful when Gerrit uses a self-signed or internal CA cert.
+                          Default: "false" (Python default SSL behavior).
 
 Usage:
   python gerrit_api.py [--workspace PATH] <command> [args...]
@@ -41,6 +44,23 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import warnings
+
+# Module-level SSL flag; set by load_config() / main()
+_DISABLE_SSL_VERIFY: bool = False
+
+
+def _ssl_context() -> ssl.SSLContext | None:
+    """Return SSL context based on the module-level _DISABLE_SSL_VERIFY flag.
+
+    Returns None (use urllib default) when verification is enabled,
+    or a no-verify SSLContext when GERRIT_DISABLE_SSL_VERIFY=true.
+    """
+    if _DISABLE_SSL_VERIFY:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    return None
 
 
 def _ssl_noverify_context() -> ssl.SSLContext:
@@ -103,12 +123,18 @@ def _load_file_config(workspace: str | None = None) -> dict:
 
 
 def load_config(workspace: str | None = None) -> tuple[str, str, str]:
-    """Return (url, username, password) from config file (preferred) or env vars."""
+    """Return (url, username, password) from config file (preferred) or env vars.
+
+    Also reads GERRIT_DISABLE_SSL_VERIFY and updates the module-level flag.
+    """
+    global _DISABLE_SSL_VERIFY
     cfg = _load_file_config(workspace)
 
     url      = (cfg.get("GERRIT_URL") or os.environ.get("GERRIT_URL", "")).strip().rstrip("/")
     username = (cfg.get("GERRIT_USERNAME") or os.environ.get("GERRIT_USERNAME", "")).strip()
     password = (cfg.get("GERRIT_HTTP_PASSWORD") or os.environ.get("GERRIT_HTTP_PASSWORD", "")).strip()
+    ssl_flag = (cfg.get("GERRIT_DISABLE_SSL_VERIFY") or os.environ.get("GERRIT_DISABLE_SSL_VERIFY", "false")).strip().lower()
+    _DISABLE_SSL_VERIFY = ssl_flag == "true"
 
     if not url:
         _die(
@@ -152,8 +178,9 @@ def _http(method: str, url: str, username: str, password: str,
           body: dict | None = None) -> str:
     """Perform an authenticated HTTP request; return raw response body.
 
-    On SSL verification failure, automatically retries once with SSL
-    verification disabled and emits a warning.
+    Uses GERRIT_DISABLE_SSL_VERIFY to decide the SSL context.
+    When SSL verify is enabled (default) and an SSL error occurs, retries
+    once with verification disabled and emits a warning.
     """
     headers = {"Authorization": _auth_header(username, password)}
     data: bytes | None = None
@@ -167,15 +194,17 @@ def _http(method: str, url: str, username: str, password: str,
         with urllib.request.urlopen(req, context=ctx) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
+    ctx = _ssl_context()
     try:
-        return _do_request()
+        return _do_request(ctx)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         _die(f"HTTP {e.code} {e.reason}\n{detail}")
     except urllib.error.URLError as e:
-        if _is_ssl_error(e):
+        if ctx is None and _is_ssl_error(e):
             warnings.warn(
-                f"SSL verification failed for {url}; retrying with SSL verification disabled.",
+                f"SSL verification failed for {url}; retrying with SSL verification disabled.\n"
+                "  Tip: set GERRIT_DISABLE_SSL_VERIFY=true to skip verification permanently.",
                 stacklevel=2,
             )
             try:
@@ -191,8 +220,9 @@ def _http(method: str, url: str, username: str, password: str,
 def _http_bytes(url: str, username: str, password: str) -> bytes:
     """GET raw bytes (used for base64-encoded file content).
 
-    On SSL verification failure, automatically retries once with SSL
-    verification disabled and emits a warning.
+    Uses GERRIT_DISABLE_SSL_VERIFY to decide the SSL context.
+    When SSL verify is enabled (default) and an SSL error occurs, retries
+    once with verification disabled and emits a warning.
     """
     headers = {"Authorization": _auth_header(username, password)}
     req = urllib.request.Request(url, headers=headers)
@@ -201,15 +231,17 @@ def _http_bytes(url: str, username: str, password: str) -> bytes:
         with urllib.request.urlopen(req, context=ctx) as resp:
             return resp.read()
 
+    ctx = _ssl_context()
     try:
-        return _do_request()
+        return _do_request(ctx)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         _die(f"HTTP {e.code} {e.reason}\n{detail}")
     except urllib.error.URLError as e:
-        if _is_ssl_error(e):
+        if ctx is None and _is_ssl_error(e):
             warnings.warn(
-                f"SSL verification failed for {url}; retrying with SSL verification disabled.",
+                f"SSL verification failed for {url}; retrying with SSL verification disabled.\n"
+                "  Tip: set GERRIT_DISABLE_SSL_VERIFY=true to skip verification permanently.",
                 stacklevel=2,
             )
             try:
