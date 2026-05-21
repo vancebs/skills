@@ -60,10 +60,20 @@ def check_python():
 
 
 def _find_skill(name: str) -> Path | None:
+    """Locate a skill directory; tolerates case differences introduced by npx skills."""
+    candidates = [name, name.lower(), name.upper()]
     for base in [Path.cwd(), Path.home()]:
-        p = base / ".agents" / "skills" / name
-        if p.is_dir():
-            return p
+        skills_root = base / ".agents" / "skills"
+        for variant in candidates:
+            p = skills_root / variant
+            if p.is_dir():
+                return p
+        # Fallback: case-insensitive scan of all entries
+        if skills_root.is_dir():
+            target = name.lower()
+            for entry in skills_root.iterdir():
+                if entry.is_dir() and entry.name.lower() == target:
+                    return entry
     return None
 
 
@@ -88,15 +98,15 @@ def check_t2mcodingrule_skill():
 
 
 def check_gerrit_env_vars(cfg: dict):
-    del cfg
     ok = True
     for var in ["GERRIT_URL", "GERRIT_USERNAME", "GERRIT_HTTP_PASSWORD"]:
-        val = os.environ.get(var, "")
+        val = (cfg.get(var) or os.environ.get(var, "")).strip()
+        source = "配置文件" if cfg.get(var) else "环境变量"
         if val:
             display = val if var in ("GERRIT_URL", "GERRIT_USERNAME") else val[:4] + "****"
-            print(f"{_OK} {var} = {display}")
+            print(f"{_OK} {var} = {display}  [{source}]")
         else:
-            print(f"{_FAIL} {var} 未设置  →  export {var}=...")
+            print(f"{_FAIL} {var} 未设置  →  在配置文件或环境变量中设置 {var}")
             ok = False
     return ok
 
