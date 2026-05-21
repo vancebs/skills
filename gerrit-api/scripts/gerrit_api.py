@@ -310,7 +310,7 @@ def cmd_get_change(base_url: str, username: str, password: str, args: list[str])
         _die("Usage: get-change <change-id> [OPTION ...]")
     change_id = args[0]
     opts_list = args[1:] if len(args) > 1 else ["CURRENT_REVISION", "DETAILED_LABELS", "DETAILED_ACCOUNTS"]
-    opts = "".join(f"&o={o}" for o in opts_list)
+    opts = "&".join(f"o={o}" for o in opts_list)
     _out(_get(base_url, f"/changes/{change_id}?{opts}", username, password))
 
 
